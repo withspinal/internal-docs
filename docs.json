@@ -3,9 +3,9 @@
   "theme": "mint",
   "name": "Spinal Internal Docs",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#55583F",
+    "light": "#878A6A",
+    "dark": "#363729"
   },
   "favicon": "/favicon.svg",
   "navigation": {
@@ -13,14 +13,8 @@
       {
         "tab": "Home",
         "icon": "house",
-        "groups": [
-          {
-            "group": "Getting Started",
-            "pages": [
-              "index",
-              "quickstart"
-            ]
-          }
+        "pages": [
+          "index"
         ]
       },
       {
