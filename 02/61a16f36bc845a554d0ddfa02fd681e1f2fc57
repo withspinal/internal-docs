@@ -1,0 +1,25 @@
+docs.json
+  s_f2fb605dfdad76::t_edb80b00812524 35-36
+fleet/offboarding.mdx
+  s_f2fb605dfdad76::t_24aa2fa8cdb37f 1-82
+fleet/overview.mdx
+  s_f2fb605dfdad76::t_53285364ba03ee 39
+fleet/what-is-created.mdx
+  s_f2fb605dfdad76::t_f47737cf96ebe9 1-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "0261a16f36bc845a554d0ddfa02fd681e1f2fc57",
+  "prompts": {},
+  "sessions": {
+    "s_f2fb605dfdad76": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82a69a88-2add-48d2-b370-f0d51c55abc8",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andrew van Rensburg <andrew@withspinal.com>"
+    }
+  }
+}
