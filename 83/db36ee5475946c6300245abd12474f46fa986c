@@ -1,0 +1,27 @@
+logo/light.svg
+  s_87c872b6d338ae::t_3454ac3e1820ed 1-9
+favicon.svg
+  s_87c872b6d338ae::t_3454ac3e1820ed 1-3
+index.mdx
+  s_87c872b6d338ae::t_44efe58899de6e 2-5,8-56
+logo/dark.svg
+  s_87c872b6d338ae::t_3454ac3e1820ed 1-9
+docs.json
+  s_87c872b6d338ae::t_1cd97d93ea1027 6-8,16-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "83db36ee5475946c6300245abd12474f46fa986c",
+  "prompts": {},
+  "sessions": {
+    "s_87c872b6d338ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "57ce062c-e53c-4a24-86eb-2b2c22ec600e",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andrew van Rensburg <andrew@withspinal.com>"
+    }
+  }
+}
