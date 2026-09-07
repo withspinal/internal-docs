@@ -32,6 +32,8 @@
             "pages": [
               "fleet/overview",
               "fleet/deploying",
+              "fleet/what-is-created",
+              "fleet/offboarding",
               "fleet/new-customer",
               "fleet/customer-onboarding",
               "fleet/deploy-job",

@@ -1,0 +1,91 @@
+---
+title: "What a launch creates"
+sidebarTitle: "What a launch creates"
+description: "Every resource that exists for a customer, in every system, with its exact name. The record offboarding works from."
+icon: "list-tree"
+---
+
+A launch creates resources in six systems. Every name is derived from the slug, so this
+page is the complete list for any customer once you substitute `<slug>`. Nothing on it was
+named by a person, and nothing a launch creates is missing from it.
+
+To see what exists for a customer right now, run the offboard job without confirming.
+It prints this list with each item's live state and changes nothing:
+
+```bash
+gcloud run jobs execute fleet-offboard --region europe-west2 --project spinal-454720 \
+  --args=<slug> --wait
+```
+
+That output is the authoritative inventory. `customers/<slug>/manifest.md` is hand-written
+and can lag behind it.
+
+## Azure, in the customer's subscription
+
+Everything sits in one resource group, `rg-spinal-<slug>`. `<suffix>` is eight characters
+derived from the subscription id, the same for every resource in that subscription.
+
+| Area | Resources |
+|---|---|
+| Network | `vnet-<slug>`; route table `rt-egress-<slug>`; private DNS zones for Postgres, Redis, Key Vault, and blob storage, each linked to the VNet as `link-vnet-<slug>`; private endpoints `pe-redis-<slug>`, `pe-kv-<slug>`, `pe-storage-<slug>` |
+| Egress firewall, when enabled | `fw-<slug>`, policy `fwpol-<slug>`, public IP `pip-fw-<slug>` |
+| Data | Postgres `psql-<slug>-<suffix>` with database `dashboard`; Redis `redis-<slug>-<suffix>`; storage account `st<slug><suffix>` with container `client-files` |
+| Secrets | Key Vault `kv-<slug>-<suffix>` holding `app-env`, `temporal-api-key`, `gcp-runtime-key`, `redis-password`, `tls-cert` |
+| Compute | Log Analytics `log-<slug>`; Container Apps environment `env-<slug>`; apps `dashboard-backend-<slug>`, `temporal-worker-<slug>`, `frontend-<slug>`, `gotenberg-<slug>` |
+| Edge | Application Gateway `agw-<slug>` with public IP `pip-agw-<slug>` and certificate `cert-<slug>` |
+| Identities | Managed identities `id-backend-<slug>` and `id-agw-<slug>`; one role assignment giving the backend identity blob access on the storage account |
+
+Outside the group, two deployment records: `fleet-<slug>` at subscription scope and
+`deploy-<slug>-resources` in the group.
+
+<Note>
+The customer's data lives here: Postgres, blob storage, and the vault. Deleting the
+resource group deletes it. The vault is soft-deleted for seven days with no purge
+protection, so it can be purged straight away when that is intended.
+</Note>
+
+Not created by the launch, but present: the Lighthouse delegation, deployed by the
+customer's Owner from `infra/azure/lighthouse.bicep`.
+
+## GCP, in the fleet project
+
+Three kinds of thing, all in `spinal-454720` for the test tier.
+
+| Kind | Names |
+|---|---|
+| Service accounts, each with one JSON key | `registry-reader-<slug>@spinal-454720.iam.gserviceaccount.com`, `app-runtime-<slug>@spinal-454720.iam.gserviceaccount.com` |
+| IAM bindings | the registry reader has `artifactregistry.reader` on the `dashboard` repo; the runtime account has `aiplatform.user`, `documentai.apiUser`, and `cloudtranslate.user` on the project, plus `run.invoker` on Flipt when configured |
+| Secret Manager, labelled `customer=<slug>` | `<slug>-env`, `<slug>-auth0-client-secret`, `<slug>-gcp-sa-key`, `<slug>-gcp-runtime-key`, `<slug>-temporal-api-key`, `<slug>-tls-cert` |
+
+`<slug>-env` is generate-once and holds the password Postgres was created with. It is the
+one secret that must never be deleted while the customer's Postgres exists.
+
+## Auth0, in the shared tenant
+
+Created: the login application `dashboard-<slug>`, and its enablement on every connection
+the customer's organisation has enabled.
+
+Not created by the launch, but present and adopted: the organisation itself and its
+enterprise connection. A person creates both before the launch.
+
+## Temporal Cloud
+
+Namespace `<slug>.fg5rt` in `gcp-europe-west3`, service account `<slug>-worker` scoped to
+that namespace only, and one API key for it. The key lives in `<slug>-temporal-api-key`
+and in the customer's vault.
+
+## Cloudflare and Let's Encrypt
+
+One A record, `dashboard.<slug>.withspinal.com`, pointing at the gateway's public IP,
+grey-cloud. One certificate for that name, which expires within ninety days and needs no
+revocation.
+
+## Git and telemetry
+
+`customers/<slug>/` in the fleet repo, and the slug's entry in the customer choice lists of
+`deploy.yml` and `offboard.yml`. Logfire and Sentry hold events tagged with the slug,
+subject to their retention settings.
+
+## Removing all of it
+
+[Offboarding](/fleet/offboarding) walks this list in reverse.

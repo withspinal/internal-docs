@@ -36,7 +36,7 @@ activities for local development.
 | `target.env` | Declared facts: subscription and tenant ids, Auth0 org id, runtime mgmt client id |
 | `params.bicepparam` | Every template parameter. Secret values arrive via `readEnvironmentVariable(...)` at deploy time |
 | `env.schema` | Key names in the composed env blob, no values |
-| `manifest.md` | Facts, minted identities, Secret Manager pointers, status |
+| `manifest.md` | Facts, dates, status, and the closing record at offboarding. Hand-written; the live inventory is derived, see [What a launch creates](/fleet/what-is-created) |
 
 <Warning>
 No secret values in the repo, ever. Secrets live in GCP Secret Manager (fleet project) and

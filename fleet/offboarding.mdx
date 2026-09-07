@@ -1,0 +1,82 @@
+---
+title: "Offboarding"
+sidebarTitle: "Offboarding"
+description: "How a customer leaves: the two flavours, the two phases, the button, and what each step removes"
+icon: "door-open"
+---
+
+A customer leaving is the launch in reverse, run by the `fleet-offboard` Cloud Run Job.
+It works from [What a launch creates](/fleet/what-is-created): every step checks whether a
+thing exists and removes it only if it does, so a run that stops can be re-issued and
+resumes where it left off.
+
+## Two decisions before you start
+
+**Flavour** says what happens to the customer's Azure resource group, which holds their
+data and sits in their subscription on their bill.
+
+- `release`: Spinal walks away. The group stays. Only Spinal-side things are removed. Tell
+  the customer plainly what they keep: their data in Postgres and blob storage, not a
+  working product. Login goes through Auth0, workers through Temporal, AI features through
+  the GCP runtime key, and the next image pull through the registry key, and all of those
+  are removed.
+- `destroy`: everything goes, the resource group included.
+
+**Phase** says how far to go this time.
+
+- `disable`: reversible. Traffic and logins are cut, identities and secrets are disabled,
+  nothing is deleted. A deploy run puts it all back.
+- `purge`: deletes. Run it after the retention window agreed with the customer, typically
+  thirty days after `disable`.
+
+## Running it
+
+In GitHub: **Actions** → **Offboard customer** → **Run workflow**. Pick the customer, the
+flavour, and the phase. Leave **confirm** empty for a dry run that prints the inventory and
+changes nothing. Type the slug into **confirm** to apply. The customer's environment gate
+applies, so a reviewer can be required.
+
+The same from a shell:
+
+```bash
+gcloud run jobs execute fleet-offboard --region europe-west2 --project spinal-454720 \
+  --args=<slug>,--flavour,release,--phase,disable,--confirm,<slug> --wait
+```
+
+The job prints the inventory before and after, and ends with a closing record. Paste that
+record into `customers/<slug>/manifest.md`.
+
+## What each step does
+
+Steps run in this order. A step not listed for the chosen flavour and phase is skipped.
+
+| Step | disable | purge | Notes |
+|---|---|---|---|
+| dns | delete the A record | same | First, so traffic stops |
+| auth0-app | remove the app from the org's connections | delete the app | |
+| auth0-org | | delete the org | `destroy` only. The enterprise connection is tenant-level and is reported, not deleted |
+| temporal | | delete the scoped service account, then the namespace | Deleting the account kills its API key |
+| azure-stack | | delete `rg-spinal-<slug>`, purge the soft-deleted vault, delete the deployment record | `destroy` only. The long step, often 30 minutes |
+| gcp-identities | disable both service accounts | remove their IAM bindings, then delete them | Bindings first, or inert `deleted:` entries linger |
+| gcp-secrets | disable every enabled version of the six secrets | delete the six secrets | |
+| lighthouse | | remove the delegation | Last, because it is our own access |
+
+## Afterwards
+
+Paste the closing record into the manifest, then open a PR that removes `customers/<slug>/`
+and the slug's entry from both choice lists. Git history keeps the folder. That PR is the
+last entry in the customer's operational record.
+
+## Two things to know
+
+Both concern access the job needs and may not have.
+
+<Warning>
+**The delegation can only be removed by Spinal for customers delegated after 2026-09-07.**
+`lighthouse.bicep` now grants the Registration Assignment Delete role. littlebrolly was
+delegated before that, so its purge run reports the delegation as left in place, and the
+customer's Owner removes it, or redeploys the template first.
+</Warning>
+
+The Auth0 provisioning credential needs `delete:clients` for the app step and
+`delete:organizations` for the `destroy` org step. Both were granted on 2026-09-07.
