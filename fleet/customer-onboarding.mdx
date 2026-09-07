@@ -1,0 +1,99 @@
+---
+title: "Customer onboarding runbook"
+sidebarTitle: "Customer onboarding"
+description: "From contract signed to live dashboard. First full run: littlebrolly, 2026-09-02"
+icon: "handshake"
+---
+
+The sequence: customer runs one command in their tenant, we declare the facts in a
+customer folder, then `./launch.sh <slug>` and an approve signal. The workflow does the
+rest.
+
+## Step 1: the customer runs the Lighthouse deployment
+
+The customer delegates one subscription to Spinal via Azure Lighthouse. After this, our
+Spinal-tenant credentials can deploy into their subscription. We never log into their
+tenant and they never create an account for us.
+
+<Steps>
+  <Step title="Send them lighthouse.bicep">
+    The file is `infra/azure/lighthouse.bicep`. Useful wording for the email: it grants
+    Spinal's `fleet-operators` group Contributor plus a narrow role-assignment right; the
+    delegation shows up in their portal under Service providers; they can revoke it there
+    at any time without our involvement; no credentials change hands.
+  </Step>
+  <Step title="They deploy it">
+    The deploying account must be an Owner of the subscription and a member (not guest) of
+    their directory.
+
+    ```bash
+    az login
+    az account set --subscription <the subscription for Spinal>
+    az deployment sub create --location uksouth \
+      --template-file lighthouse.bicep \
+      --parameters fleetPrincipalId=44fc7db9-dfb0-4d0a-9cb2-cfa7bc5cd423
+    ```
+
+    <Warning>
+    `az deployment sub create` targets whatever subscription is active in their CLI. An
+    admin with several subscriptions can delegate the wrong one without noticing. Treat
+    the `az account set` line as required, and check the subscription id embedded in the
+    output they send back.
+    </Warning>
+  </Step>
+  <Step title="They send back the command's JSON output">
+    The output contains the delegated subscription id (in every resource id) and the
+    `parameters` block, which confirms they deployed the file unmodified.
+  </Step>
+  <Step title="Verify the delegation yourself">
+    ```bash
+    az account list --refresh \
+      --query "[?id=='<their-sub-id>'].managedByTenants"
+    ```
+    The delegation is live when Spinal's tenant id (`77ed63dd-…`) appears in the list.
+  </Step>
+</Steps>
+
+<Note>
+The customer's tenant id can be looked up without asking them:
+`https://login.microsoftonline.com/<their-domain>/v2.0/.well-known/openid-configuration`
+returns it unauthenticated.
+</Note>
+
+## Step 2: Spinal-side facts
+
+<Steps>
+  <Step title="Create the Auth0 Organization">
+    In the shared Auth0 tenant, create the org and attach a connection. The launch fails
+    fast if the org has zero connections, since nobody could ever sign in. Note the
+    `org_…` id.
+  </Step>
+  <Step title="Author customers/<slug>/">
+    Copy the shape of an existing folder. `target.env` needs `SUBSCRIPTION_ID` (from step
+    1), `TENANT_ID`, `AUTH0_ORG_ID`, `AUTH0_DOMAIN`, `AUTH0_TENANT_DOMAIN`, and
+    `AUTH0_MGMT_CLIENT_ID` (the runtime app with invitation scopes). There is no
+    `AUTH0_LOGIN_CLIENT_ID`: the launch mints a login app per customer.
+  </Step>
+  <Step title="Pin images">
+    Resolve the sha tag that `latest` currently points to in Artifact Registry and pin
+    that. Never pin `latest` itself.
+  </Step>
+</Steps>
+
+## Step 3: launch
+
+```bash
+./launch.sh <slug>
+# after the readiness gate passes:
+docker compose exec temporal temporal workflow signal \
+  --workflow-id launch-<slug> --name approve
+```
+
+Nothing is mutated before the approve signal. Stages and monitoring commands are on
+[Launch workflow](/fleet/launch-workflow).
+
+## After launch
+
+The backend upserts the customer's Group row at first boot, so admission works as soon as
+the stack is up. The remaining human step for a working login is sending the first org
+invitation, from the Auth0 dashboard or the Management API.

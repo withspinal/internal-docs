@@ -1,0 +1,37 @@
+---
+title: "Naming limits"
+sidebarTitle: "Naming limits"
+description: "Why the customer slug is capped at 12 characters"
+icon: "ruler"
+---
+
+The slug is embedded in every derived resource name, so its maximum length comes from the
+tightest downstream limit. The template enforces `@maxLength(12)`.
+
+## The budgets
+
+| Derived name | Formula | Azure/GCP limit | Slug ceiling |
+|---|---|---|---|
+| Key Vault | `kv-<slug>-<8-char suffix>` | 24 (globally unique DNS name) | 12 |
+| Storage account | `st<slug><8-char suffix>` | 24, no hyphens | 14 |
+| GCP service account | `registry-reader-<slug>` | 30 | 14 |
+| Container App | `dashboard-backend-<slug>` | 32 | 14 |
+
+Key Vault is the binding constraint. The 8-character suffix is
+`take(uniqueString(subscription().id), 8)`; it exists because Key Vault and storage
+account names are unique across all of Azure, and another Azure customer holding
+`kv-<slug>` would otherwise break the deploy.
+
+Two of these limits surfaced during the littlebrolly launch, which used a 12-character
+slug. The GCP service-account prefix had to change from `azure-registry-reader-` (22
+characters, giving 34 total against a cap of 30) to `registry-reader-`. Separately,
+Temporal Cloud rejected an em-dash in a service-account description string; its
+`printasciiws` validation accepts printable ASCII only.
+
+## Why the hostname is tied to the slug
+
+The worker derives `dashboard.<slug>.withspinal.com` from the slug in six places: the
+composed env URLs, the Auth0 callback wiring, the TLS certificate, the DNS record, the
+smoke test, and the workflow's result payload. There is no separate hostname setting. If
+the customer-facing name matters, pick the slug for the hostname and accept longer
+internal resource names.

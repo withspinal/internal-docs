@@ -1,0 +1,52 @@
+---
+title: "Fleet overview"
+sidebarTitle: "Overview"
+description: "What spinal-fleet is and how it is organised"
+icon: "ship"
+---
+
+spinal-fleet is the control plane for Spinal's private SaaS deployments. Each enterprise
+customer gets a full Spinal stack in their own Azure tenant. We operate it through
+[Azure Lighthouse](https://learn.microsoft.com/azure/lighthouse/), so we never hold
+credentials in the customer's tenant.
+
+## The model
+
+Git is the control plane; the clouds are the data plane.
+
+Anything we choose (image pins, hostnames, config) changes only via PR to `spinal-fleet`.
+`git log customers/<slug>/` is that customer's deployment history. Anything that is simply
+true about the environment (what's deployed, who has access) is derived by automation and
+never written by hand.
+
+Operations run in GCP as the `fleet-deploy` Cloud Run Job, as the
+[fleet identity](/fleet/fleet-identity); start with
+[How deployment works](/fleet/deploying). Every
+activity is an idempotent "ensure", so re-running after a failure is always safe, and a
+release is simply a re-run with new image pins. This is the strategy for flaky cloud APIs
+and also the disaster-recovery story. A Temporal worker in the compose stack runs the same
+activities for local development.
+
+## One folder per customer
+
+`customers/<slug>/` is the customer's complete operational record:
+
+| File | Contents |
+|------|----------|
+| `target.env` | Declared facts: subscription and tenant ids, Auth0 org id, runtime mgmt client id |
+| `params.bicepparam` | Every template parameter. Secret values arrive via `readEnvironmentVariable(...)` at deploy time |
+| `env.schema` | Key names in the composed env blob, no values |
+| `manifest.md` | Facts, minted identities, Secret Manager pointers, status |
+
+<Warning>
+No secret values in the repo, ever. Secrets live in GCP Secret Manager (fleet project) and
+in the customer's own Key Vault. The repo stores pointers and version pins only.
+</Warning>
+
+## The slug
+
+The folder name is the slug. The slug appears in the public hostname
+(`dashboard.<slug>.withspinal.com`), every Azure resource name, the Temporal namespace,
+Secret Manager secret names, and the minted GCP and Auth0 identities. Renaming after
+launch would amount to a redeploy, so treat the slug as permanent. It also has a hard
+12-character limit; see [Naming limits](/fleet/naming-limits).

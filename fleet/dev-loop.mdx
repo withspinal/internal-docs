@@ -1,0 +1,69 @@
+---
+title: "Dev loop"
+sidebarTitle: "Dev loop"
+description: "The Docker-only loop, and environment problems that look like launch failures"
+icon: "laptop-code"
+---
+
+The compose stack is for working on the worker; customers are deployed by the
+[deploy job](/fleet/deploy-job) in GCP.
+
+Nothing installs on the host. The Temporal CLI lives in the temporal container and the
+worker runs in the toolbox image, which pins az, gcloud, certbot, and bicep. Your ambient
+`az login` and `gcloud auth` sessions are volume-mounted in, and with the compose defaults
+they are used only to impersonate the [fleet identity](/fleet/fleet-identity), so the loop
+acts exactly as Cloud Run does. Source directories are live-mounted, so most edits only
+need `docker compose restart worker`. Dockerfile or compose changes need
+`docker compose up -d --build worker`.
+
+## Environment problems seen in practice
+
+Each of these looked like a launch failure at first. All four came from the laptop's
+environment rather than from Azure or the fleet code.
+
+<AccordionGroup>
+  <Accordion title="az runs a macOS bicep binary: 'Exec format error'">
+    Mounting the host's `~/.azure` for auth also mounts the host's macOS bicep binary over
+    the container's copy. The toolbox image now installs its Linux bicep to
+    `/usr/local/bin` and sets `AZURE_BICEP_USE_BINARY_FROM_PATH=true`, plus
+    `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` because the slim base image has no libicu.
+    If this error appears, the image predates the fix; rebuild.
+  </Accordion>
+  <Accordion title="Smoke test cannot resolve a hostname that public DNS resolves">
+    The smoke test resolves a record that `ensure_dns_record` created seconds earlier.
+    Docker Desktop's host-side resolver caches the negative answer from before the record
+    existed (TTL up to 1800s), and container restarts do not clear it. The worker service
+    now sets `dns: [1.1.1.1, 8.8.8.8]` in compose. A local browser or dig has the same
+    problem; flush with `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`
+    or wait out the TTL.
+  </Accordion>
+  <Accordion title="TLS verification fails for the new domain from every local tool">
+    Check the served certificate's issuer before debugging Azure:
+    ```bash
+    echo | openssl s_client -connect <host>:443 -servername <host> 2>/dev/null \
+      | openssl x509 -noout -issuer
+    ```
+    An issuer like `O=Fortinet` means a firewall on the local network is intercepting TLS
+    to the new, uncategorised domain and re-signing it. The deployment is fine. Verify
+    from another network (phone hotspot works) or look the domain up on crt.sh to see the
+    real issuance. Gym and hotel Wi-Fi are common sources. The deploy job runs in Cloud Run
+    and is not behind such a device.
+  </Accordion>
+  <Accordion title="gcloud UNAUTHENTICATED partway through a launch">
+    The mounted gcloud session's token expired and refreshing it needs a browser
+    (`gcloud auth login`). Laptop sleep during a long launch is the usual trigger.
+    Re-authenticate and restart the workflow; completed stages are skipped.
+  </Accordion>
+</AccordionGroup>
+
+## Long launches
+
+A first launch takes 30 to 90 minutes across cloud APIs that occasionally fail or
+rate-limit. Points that keep this manageable:
+
+- A failed workflow restarted with the same command resumes where it left off, because
+  every activity is an idempotent ensure.
+- The env blob is generate-once. After Postgres exists, never delete `<slug>-env`: its
+  `DB_PASSWORD` is the one the live server was created with. Config changes are new
+  Secret Manager versions that alter specific keys.
+- Keep the laptop awake during the `full-stack` stage, or accept a restart.

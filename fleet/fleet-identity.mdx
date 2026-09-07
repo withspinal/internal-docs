@@ -1,0 +1,109 @@
+---
+title: "The fleet identity"
+sidebarTitle: "Fleet identity"
+description: "One GCP service account for both clouds: Azure access by federation, no client secret anywhere"
+icon: "id-badge"
+---
+
+One GCP service account, `fleet-worker@spinal-454720.iam.gserviceaccount.com`, is the
+control plane's identity in both clouds. Every launch and release action is attributable
+to it: in Cloud Audit Logs on the GCP side, and in the customer's Azure activity log on the
+other.
+
+## How Azure access is derived
+
+Azure access is derived from the GCP identity. Nothing is configured separately for Azure.
+
+1. An Entra app registration, `spinal-fleet-worker` (client id
+   `6aeaabcb-d74a-4d5b-83b8-f77a9069c611`, in Spinal's tenant), carries a **federated
+   credential** that trusts Google as an issuer. Its subject is the service account's
+   numeric unique id; its audience is Entra's fixed token-exchange audience.
+2. The worker asks the metadata server for a Google ID token for that audience and runs
+   `az login --service-principal --federated-token` with it.
+3. The app's service principal is a member of the `fleet-operators` security group, which
+   is what every Lighthouse delegation names. Lighthouse projects the customer's
+   subscription to the group's members, so the job sees it and operates in it.
+
+No Azure client secret exists. The only Azure credential ever minted is created on demand
+from the GCP identity, is bound to one audience, and is dead within the hour.
+
+<Info>
+Because the delegation names the group, a new customer never learns about the identity and
+the identity never learns about a new customer. Adding an operator or a new automation
+identity is a group membership change in Spinal's tenant, never a customer-side redeploy.
+</Info>
+
+### The assertion is short-lived
+
+The federated assertion lives about an hour and az cannot refresh it. The worker re-runs
+the login before any `az` call once the previous login is older than thirty minutes. An
+`az` process that outlives its access token (a long ARM deploy) fails; the job's retry logs
+in again and ARM resumes the incremental deployment. The login uses a private az config
+directory so it never touches a mounted human session.
+
+## What the identity may do
+
+The IAM is the minimum for what the activities actually call, each role tied to the
+command that needs it.
+
+| Grant | Scope | Needed by |
+|-------|-------|-----------|
+| `secretmanager.admin` | project | `gcloud secrets create` / `versions add` / `access` (compose the env, store minted keys and the cert, read at deploy) |
+| `iam.serviceAccountAdmin` | project | `gcloud iam service-accounts create` (registry reader and runtime SA per customer) |
+| `iam.serviceAccountKeyAdmin` | project | `gcloud iam service-accounts keys create` (their JSON keys, straight into Secret Manager) |
+| `resourcemanager.projectIamAdmin` | project | `gcloud projects add-iam-policy-binding` (Vertex, Document AI, Translate roles for the runtime SA) |
+| `artifactregistry.admin` | the `dashboard` repo only | `gcloud artifacts repositories add-iam-policy-binding` (registry reader per customer) |
+| Contributor + constrained User Access Administrator | Spinal's Staging subscription | same-tenant deployments (dev), where Lighthouse does not apply |
+
+The project IAM admin grant is the powerful one, and it is inherent to what the control
+plane does. The Staging grant mirrors what Lighthouse gives elsewhere: its User Access
+Administrator carries an ABAC condition limiting it to assigning the same two role
+definitions the delegation allows.
+
+## The dev loop runs the same chain
+
+`docker-compose.yml` defaults to the fleet identity. `FLEET_GCP_SERVICE_ACCOUNT` makes
+gcloud impersonate the service account, and the federation assertion is minted through
+that same impersonation. A laptop therefore exercises exactly what Cloud Run does, with the
+operator's own sessions used only to impersonate, never to act. Set
+`FLEET_GCP_SERVICE_ACCOUNT= FLEET_AZURE_CLIENT_ID=` to act as yourself instead.
+
+Impersonation needs `roles/iam.serviceAccountTokenCreator` on the service account, which
+the setup script grants to whoever runs it.
+
+## The CI identity
+
+GitHub Actions has a separate, narrower identity: `fleet-github@spinal-454720`. The
+`withspinal/spinal-fleet` repository federates into it through the GitHub identity pool the
+app repos already use. It may push the toolbox image (`artifactregistry.writer` on the
+`fleet` repo), replace and execute the `fleet-deploy` job (`run.developer`), deploy a job
+that runs as `fleet-worker` (`serviceAccountUser` on it), and read logs. GitHub stores no
+cloud secret.
+
+<Note>
+`run.developer` is granted project-wide because creating a job needs it above the job
+resource. It is the one grant broader than its use; it also reaches the project's few dev
+jobs.
+</Note>
+
+## Creating or converging it
+
+```bash
+./infra/fleet-identity.sh                                            # test tier
+FLEET_GCP_PROJECT_ID=spinal-production-502715 ./infra/fleet-identity.sh   # production tier
+```
+
+Run it with your own sessions: GCP project Owner and Entra Global Administrator. It is
+idempotent; re-running converges drift. It creates the service account and its IAM, the
+app registration, federated credential, and group membership, the Staging parity grants,
+your impersonation grant, and the CI identity. It ends by proving the chain: impersonate,
+mint the assertion, log in as the app, list the subscriptions the identity can see. The
+delegated customer subscription must appear.
+
+<Tip>
+The verify step may retry a few times. Entra takes about a minute to honour a new
+federated credential and IAM grants propagate on a similar delay. A fresh Cloud Run
+execution right after a change can see the same delay; the job's retry absorbs it.
+</Tip>
+
+First converged 2026-09-03 (fleet identity) and 2026-09-04 (CI identity).

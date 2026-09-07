@@ -1,0 +1,158 @@
+---
+title: "New customer from zero"
+sidebarTitle: "New customer: from 0"
+description: "The complete checklist for launching a new customer. Follow top to bottom."
+icon: "list-check"
+---
+
+Follow this in order when a new customer signs. Commands are copy-pasteable after
+replacing `<slug>` and the customer ids. Background for any step is in
+[Customer onboarding](/fleet/customer-onboarding) and the deep dives.
+
+## 0. Preconditions
+
+Verify rather than set up; all of this exists already for the current tier.
+
+```bash
+# Spinal-tenant az session and gcloud session both alive
+az account show --query "{tenant:tenantId, user:user.name}"
+gcloud auth list --filter=status:ACTIVE --format="value(account)"
+
+# the six fleet secrets exist (the readiness gate will re-check)
+gcloud secrets list --project spinal-454720 --filter="name~fleet-" --format="value(name)"
+```
+
+The deploy itself runs in GCP (see [Deploy job](/fleet/deploy-job)), so nothing here needs
+Docker or a long-lived laptop session. The `az` session is for verifying the delegation in
+step 2; the gcloud session is for resolving image pins and, optionally, running the job by
+hand.
+
+## 1. Choose the slug
+
+Lowercase, letters and digits, 12 characters maximum. The slug becomes the public
+hostname `dashboard.<slug>.withspinal.com` and every resource name, and it is permanent.
+Limits are explained in [Naming limits](/fleet/naming-limits).
+
+## 2. Customer runs the Lighthouse deployment
+
+Send `infra/azure/lighthouse.bicep` to their IT admin with the instruction to run, as an
+Owner of the target subscription, with that subscription selected:
+
+```bash
+az login
+az account set --subscription <the subscription for Spinal>
+az deployment sub create --location uksouth \
+  --template-file lighthouse.bicep \
+  --parameters fleetPrincipalId=44fc7db9-dfb0-4d0a-9cb2-cfa7bc5cd423
+```
+
+Ask for the command's JSON output back. From it, note the subscription id (it appears in
+every resource id). Look up their tenant id yourself:
+
+```bash
+curl -s https://login.microsoftonline.com/<their-domain>/v2.0/.well-known/openid-configuration \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['issuer'].split('/')[3])"
+```
+
+Then verify the delegation from your own session:
+
+```bash
+az account list --refresh --query "[?id=='<their-sub-id>'].managedByTenants"
+# Spinal's tenant id 77ed63dd-da72-44f6-b13a-3ea39a7b5abf must appear
+```
+
+## 3. Create the Auth0 Organization
+
+In the shared Auth0 tenant (`dev-48ptaf8df3jya1dz`): create an Organization for the
+customer and attach at least one connection. Note the `org_…` id. The launch fails fast if
+the org is missing or has no connections. Do not create an application; the launch mints
+one. See [Auth0](/fleet/auth0).
+
+## 4. Author the customer folder
+
+```bash
+mkdir customers/<slug>
+```
+
+Create four files, copying the shape from `customers/littlebrolly/`:
+
+`target.env`: the declared facts:
+
+```bash
+SUBSCRIPTION_ID=<from step 2>
+TENANT_ID=<from step 2>
+AUTH0_ORG_ID=<from step 3>
+AUTH0_DOMAIN=auth.withspinal.com
+AUTH0_TENANT_DOMAIN=dev-48ptaf8df3jya1dz.uk.auth0.com
+AUTH0_MGMT_CLIENT_ID=KYl5o1pqcflTzOV6V2TsKh39RJJrNaXr
+```
+
+`params.bicepparam`: copy littlebrolly's, change `customerSlug` and `publicHostName`,
+then resolve fresh image pins (pin the sha tag shown alongside `latest`, never `latest`
+itself):
+
+```bash
+gcloud artifacts docker images list \
+  europe-west2-docker.pkg.dev/spinal-454720/dashboard/backend \
+  --include-tags --filter="tags~latest" --format="value(tags)"
+gcloud artifacts docker images list \
+  europe-west2-docker.pkg.dev/spinal-454720/dashboard/frontend \
+  --include-tags --filter="tags~latest" --format="value(tags)"
+```
+
+`env.schema`: copy as-is (the key set is fixed by `compose_customer_env`).
+
+`manifest.md`: record the facts gathered so far; the launch fills in the rest.
+
+Add the slug to the `customer` choice list in `.github/workflows/deploy.yml`; CI fails the
+push if that list and `customers/` disagree. Open a PR and merge it. The push to main runs
+the toolbox workflow, which builds the image with the new folder in it and rolls the
+`fleet-deploy` job. Wait for that workflow to go green before step 5.
+
+## 5. Deploy
+
+In GitHub: **Actions** → **Deploy customer** → **Run workflow** → pick the slug. If the
+customer's GitHub environment has required reviewers, approve the run when prompted. The
+job's log streams into the run.
+
+The same thing from a shell:
+
+```bash
+gcloud run jobs execute fleet-deploy \
+  --region europe-west2 --project spinal-454720 \
+  --args=<slug> --wait
+```
+
+A first launch takes 30 to 90 minutes, most of it in the `full-stack` stage. Watch it in
+the Console under **Cloud Run** → **Jobs** → `fleet-deploy` → **Executions**.
+
+If it fails, read the log for the failing stage, fix the cause, and run it again; completed
+stages skip. Triage notes live in [Deploy job](/fleet/deploy-job) and
+[Launch workflow](/fleet/launch-workflow).
+
+<Note>
+`./launch.sh <slug>` runs the same chain from a laptop through the compose Temporal stack,
+with an approve signal. Use it for developing the worker, not for launching customers.
+</Note>
+
+## 6. Verify
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" https://dashboard.<slug>.withspinal.com/
+```
+
+A TLS error here usually means your local network is intercepting the new domain, not
+that the deployment is broken; check the issuer first (see
+[Dev loop](/fleet/dev-loop)).
+
+## 7. First login
+
+Send the first org invitation from the Auth0 dashboard (or the Management API). The
+backend upserted the customer's Group row at boot, so the invited user can sign in
+immediately.
+
+## 8. Close out
+
+Update `manifest.md` with the launch outputs (minted identities, namespace, dates), set
+the status line, and commit. The folder is the customer's operational record; keep it
+true.

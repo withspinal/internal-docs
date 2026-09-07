@@ -1,0 +1,52 @@
+---
+title: "Auth0 architecture"
+sidebarTitle: "Auth0"
+description: "Per-customer applications and the two Management API credentials"
+icon: "key"
+---
+
+## One application per customer
+
+An Auth0 application has a single Application Login URI, and organization invitation links
+are built from it. A shared application can therefore serve one hostname. Since every
+customer has their own hostname (`dashboard.<slug>.withspinal.com`), a shared app would
+send every customer's invitations to the same dashboard.
+
+The launch's `ensure_auth0_app` activity mints `dashboard-<slug>` per customer, or adopts
+it if it already exists:
+
+- Regular Web App with the same settings as the Dev Dashboard app: public client
+  (`token_endpoint_auth_method: none`), `organization_usage: require`
+- Login URI `https://dashboard.<slug>.withspinal.com/login`, plus callbacks, logout URL,
+  and web origins for that host only
+- Enabled on every connection the customer's org has enabled. This uses the
+  `/connections/{id}/clients` sub-resource; the `enabled_clients` field on the connection
+  object no longer exists in this tenant's API version
+- Client secret stored as `<slug>-auth0-client-secret` in Secret Manager. The composed env
+  carries the minted app's client id and secret
+
+The login app does not appear in `target.env`. It is minted, not declared.
+
+## The two Management API credentials
+
+<Warning>
+The Management API credential inside a customer's environment must stay narrow. The
+composed env is mounted in their backend container, so a compromise of one customer's
+environment would otherwise expose a credential with power over every customer in the
+tenant.
+</Warning>
+
+| Credential | Scopes | Where it lives |
+|------------|--------|----------------|
+| Runtime (`AUTH0_MGMT_CLIENT_ID` in target.env, paired with `fleet-auth0-mgmt-client-secret`) | org invitations only | composed into every customer env; the backend sends invitations at runtime |
+| Provisioning (`FLEET_AUTH0_PROVISIONING_CLIENT_ID`, paired with `fleet-auth0-provisioning-client-secret`) | create clients, read client keys, update connections, and related | control plane only; never in any customer file, env, or vault |
+
+Scope grants happen in the Auth0 dashboard and nowhere else; the API cannot grant scopes
+to itself. If a launch gets a 403 from the Management API, the fix is granting scopes to
+the provisioning app in the dashboard. Do not widen the runtime app.
+
+<Note>
+Known residual risk: invitation scopes are tenant-wide, so a compromised customer backend
+could invite users into a different customer's org. Auth0 has no per-org scoping for M2M
+apps, so this remains open.
+</Note>

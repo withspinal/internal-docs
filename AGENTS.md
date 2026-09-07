@@ -26,6 +26,7 @@
 - Use sentence case for headings
 - Bold for UI elements: Click **Settings**
 - Code formatting for file names, commands, paths, and code references
+- Full writing conventions and the pre-publish review pass: `.claude/skills/doc-writing/SKILL.md`. Apply them to every page.
 
 ## Content boundaries
 

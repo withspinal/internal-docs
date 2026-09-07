@@ -1,0 +1,112 @@
+---
+title: "How deployment works"
+sidebarTitle: "How deployment works"
+description: "The two-step model: a push to main prepares, a button press deploys. Read this first."
+icon: "route"
+---
+
+Deploying a customer is two steps, and they are deliberately separate. A push to `main`
+prepares and changes no customer environment. Pressing a button deploys one customer.
+Everything runs inside GCP as the fleet identity. Nothing runs on a laptop.
+
+```
+ you                          GitHub Actions                       GCP
+ ───                          ──────────────                       ───
+ merge a PR to main  ──────▶  toolbox.yml                          
+                              • choice list == customers/ ?        
+                              • worker tests                       
+                              • build toolbox image @ sha  ──────▶ Artifact Registry  fleet/toolbox:<sha>
+                              • gcloud run jobs replace    ──────▶ Cloud Run Job  fleet-deploy  (now on <sha>)
+
+ Actions ▶ Deploy customer                                         
+ pick a slug ▶ Run   ──────▶  deploy.yml                           
+                              • wait for reviewer (if set)         
+                              • gcloud run jobs execute    ──────▶ fleet-deploy --args=<slug>
+                              • stream the job log                    as fleet-worker:
+                                                                      readiness → auth0 → env → identities
+                                                                      → cert → ARM deploy → DNS → smoke test
+                                                                            │
+                                                                            ▼
+                                                                   the customer's Azure subscription
+                                                                   (through Lighthouse)
+```
+
+## Step 1: push to main prepares
+
+Every push to `main` runs the **toolbox** workflow. It checks that the customer choice list
+in `deploy.yml` matches the folders in `customers/`, runs the worker's tests, builds the
+toolbox image from that commit, and points the `fleet-deploy` Cloud Run Job at it.
+
+The image contains the worker, the pinned CLIs, and that commit's `infra/` and
+`customers/`. So after the workflow goes green, the job knows exactly what `main` knows,
+and nothing else. No customer environment has changed.
+
+## Step 2: the button deploys one customer
+
+In GitHub: **Actions** → **Deploy customer** → **Run workflow** → pick the customer.
+
+If the customer's GitHub environment has required reviewers, the run waits for approval.
+Then it executes the job for that slug, waits for it, and streams the job's log into the
+run. This is the moment a customer's environment changes.
+
+The same thing from a shell, if GitHub is unavailable:
+
+```bash
+gcloud run jobs execute fleet-deploy \
+  --region europe-west2 --project spinal-454720 \
+  --args=<slug> --wait
+```
+
+## What the job does
+
+The slug picks the folder: `customers/<slug>/` supplies the subscription to route into and
+every template parameter. The job then runs the whole chain: readiness, Auth0, env,
+identities, certificate, the ARM deployment, DNS, smoke test.
+
+Every step is an idempotent ensure. On a customer that already exists, the minting steps
+find their work done and skip; the ARM deployment changes only what the commit changed.
+This is why one job serves both a first launch and every release, and why re-running after
+a failure is always safe. A full run on an existing customer takes about five minutes.
+
+## What to do for each kind of change
+
+Every change is a PR first. The right-hand column is what you do once its toolbox
+workflow is green.
+
+| You want to | The PR | After it goes green |
+|---|---|---|
+| Ship a new backend or frontend build to a customer | bump `imageTag` / `frontendImageTag` in `customers/<slug>/params.bicepparam` | deploy that customer; ARM rolls new Container App revisions |
+| Change the infrastructure template | edit `infra/azure/*.bicep` | deploy each customer you want on it, one at a time |
+| Change the worker or the identity code | edit `worker/` | nothing; the next deploy uses it |
+| Add a customer | add `customers/<slug>/` and its option in `deploy.yml`; see [New customer from zero](/fleet/new-customer) | deploy the new slug; the first run is the launch |
+| Change the job itself (timeout, memory) | edit `infra/gcp/fleet-deploy.job.yaml` | nothing; the push replaced the job |
+| Roll a config value | add a new Secret Manager version of `<slug>-env`, no PR needed | deploy that customer; the ARM run re-seeds the vault and restarts |
+
+<Warning>
+A merged PR is not deployable until its toolbox workflow has gone green. The button always
+runs whatever `main` last rolled into the job.
+</Warning>
+
+## Who does what
+
+Three identities take part, and none of them is a person holding a cloud credential.
+
+| Identity | Used by | May |
+|---|---|---|
+| `fleet-github` | the two GitHub workflows | push the image, replace and execute the job, read its log |
+| `fleet-worker` | the job while it runs | everything the deploy needs, in GCP directly and in Azure by federation |
+| you | pressing the button | nothing in the clouds; GitHub holds no cloud secret |
+
+Why this shape works, and how it was set up, is in [Fleet identity](/fleet/fleet-identity).
+
+## When something fails
+
+The GitHub run shows the job's log. Find the last `── <stage>` line to see which step
+failed, and the error after it. Fix the cause, then run the deploy again; completed stages
+skip. Details, timeouts, and the retry behaviour are in [Deploy job](/fleet/deploy-job).
+
+## What is not part of this
+
+The compose stack on a laptop (`launch.sh`, Temporal) runs the same activities for
+developing the worker. It is the [dev loop](/fleet/dev-loop), not a way to deploy
+customers.

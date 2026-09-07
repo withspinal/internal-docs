@@ -1,0 +1,93 @@
+---
+title: "The launch workflow"
+sidebarTitle: "Launch workflow"
+description: "Stages, retry policies, and how to drive and monitor a launch"
+icon: "rocket"
+---
+
+`LaunchCustomerWorkflow` runs on Temporal and takes the slug as input. It mutates nothing
+until the approval signal.
+
+<Note>
+Customers are deployed by the [deploy job](/fleet/deploy-job), which runs these same stages
+in GCP without Temporal and without the approval signal. This page describes the Temporal
+form, which the compose [dev loop](/fleet/dev-loop) runs.
+</Note>
+
+## Stages
+
+```
+readiness            fleet secrets + target.env facts; fails fast naming every gap
+[await approval]     the contract-signed "ok"
+auth0-org            verify the declared org exists and has a connection
+auth0-app            mint the customer's own login app; secret goes to Secret Manager
+customer-env         compose <slug>-env (generate-once, never re-composed)
+service-account      registry-reader SA and key
+runtime-sa           app-runtime-<slug> Google SDK identity
+temporal             Temporal Cloud namespace and namespace-scoped worker key
+tls-cert             certbot DNS-01 via Cloudflare, converted to PFX
+full-stack           one az deployment; the template ARM-seeds the Key Vault itself
+dns                  Cloudflare A record pointing at the AGW public IP (grey-cloud)
+smoke-test           real TLS request through the front door
+```
+
+## Driving it
+
+<CodeGroup>
+```bash launch
+./launch.sh <slug>          # brings compose up, starts the workflow, prints the approve command
+```
+
+```bash approve
+docker compose exec temporal temporal workflow signal \
+  --workflow-id launch-<slug> --name approve
+```
+
+```bash watch stage
+docker compose exec temporal temporal workflow query \
+  --workflow-id launch-<slug> --type stage
+```
+
+```bash failure detail
+docker compose exec temporal temporal workflow describe \
+  --workflow-id launch-<slug> -o json     # see pendingActivities: attempt + lastFailure
+```
+</CodeGroup>
+
+Temporal UI: [http://localhost:8233](http://localhost:8233).
+
+## Restarting after a failure
+
+Every activity is an idempotent ensure, so a failed workflow is restarted with the same
+start command and workflow id. Completed work is skipped: the org check re-verifies, the
+minted app is adopted, the env blob is left alone, and the ARM deployment is incremental.
+Fix the cause and restart.
+
+## Retry policies
+
+Policies are chosen per failure mode:
+
+| Policy | Used for | Shape |
+|--------|----------|-------|
+| `RBAC_PROPAGATION` | Azure role grants becoming effective | patient backoff, 15 attempts |
+| `IDEMPOTENT_INFRA` | ARM and gcloud ensures | 5 attempts, 30s to 5m backoff |
+| `RATE_LIMITED` | Let's Encrypt (5 failed validations/hour triggers a lockout) | 3 attempts, 15m+ backoff |
+| `ONE_SHOT` | readiness and stubs | single attempt, straight to a human |
+
+<Tip>
+When az prints `The content for this response was already consumed`, that message is an az
+bug hiding the real error. Read the deployment operations instead:
+
+```bash
+az deployment operation group list -g rg-spinal-<slug> \
+  --name deploy-<slug>-resources \
+  --query "[?properties.provisioningState=='Failed']"
+```
+</Tip>
+
+## Wedged resources
+
+Azure resources can end up in a terminal Failed state that rejects further updates. Seen
+in practice: an Application Gateway returning `InternalServerError` on stop and start, and
+a private endpoint left disconnected after its target vault was deleted. In these cases
+delete the wedged resource and re-run the launch; the template recreates it identically.

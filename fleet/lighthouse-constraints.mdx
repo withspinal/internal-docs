@@ -1,0 +1,79 @@
+---
+title: "Lighthouse constraints"
+sidebarTitle: "Lighthouse constraints"
+description: "Limits of delegated deployments, as hit during the littlebrolly launch"
+icon: "tower-observation"
+---
+
+Azure Lighthouse lets Spinal-tenant identities operate customer subscriptions, with some
+hard limits. Each item below was hit during the littlebrolly launch (2026-09-02). The
+template already encodes the workarounds; this page explains why they are there.
+
+## 1. Roles with DataActions cannot be delegated
+
+The registration's limited User Access Administrator can only assign roles listed in
+`delegatedRoleDefinitionIds`, and Microsoft's documentation states that roles with
+`DataActions` are not supported there. Key Vault Secrets User and Storage Blob Data
+Contributor both have DataActions.
+
+<Warning>
+The failure mode gives no error. The role-assignment write returns `Succeeded`, the
+activity log agrees, and creating a duplicate returns `RoleAssignmentExists`. The data
+plane still ignores the assignment, and it does not appear in reads from the managing
+tenant.
+</Warning>
+
+Consequences in the template:
+
+- The Key Vault uses access policies instead of RBAC. This is the one exception to the
+  environment's RBAC-everywhere convention. Access policies are a property of the vault
+  resource, so the delegated Contributor can write them cross-tenant.
+- The Storage Blob Data Contributor assignment deploys but has no effect cross-tenant.
+  Open item for the first cross-tenant customer that uses blob features: switch the app to
+  account-key auth (listKeys is a control-plane Action, which delegates fine), or have the
+  customer's Owner create that one assignment.
+
+## 2. Role assignments need `delegatedManagedIdentityResourceId`
+
+Any role assignment a delegated deployment does create must include
+`delegatedManagedIdentityResourceId` pointing at the assignee's managed-identity resource.
+ARM uses it to confirm the principal lives in the customer tenant. Without it, preflight
+fails with `Authorization failed for template resource`. The property has no effect on
+same-tenant deploys.
+
+## 3. Contributor cannot change a vault's permission model
+
+Switching an existing vault between RBAC and access-policy mode requires unrestricted
+role-assignment rights. This is an anti-escalation guard, and the delegated Contributor
+does not qualify. Creating a vault in either mode is unrestricted. A vault created in the
+wrong mode has to be deleted, purged, and recreated.
+
+## 4. Application Gateway reads the vault's public endpoint
+
+AGW fetches Key-Vault-backed TLS certificates from Azure infrastructure, not from inside
+the VNet. With `publicNetworkAccess: 'Disabled'` on the vault, the fetch fails with
+`Access denied` in any tenant. The working configuration, now in the template:
+
+```bicep
+publicNetworkAccess: 'Enabled'
+networkAcls: {
+  defaultAction: 'Deny'
+  bypass: 'AzureServices'   // AGW is on Key Vault's trusted-services list
+}
+```
+
+General internet traffic to the vault is still denied. Readers inside the VNet continue to
+use the private endpoint.
+
+## 5. Deleting a private endpoint's target strands the endpoint
+
+Deleting a vault (or any PE target) leaves its private endpoint in a disconnected state,
+and Azure refuses to update it (`PrivateEndpointCannotBeUpdatedInDisconnectedState`).
+Delete the endpoint as well; the next deployment recreates it.
+
+## 6. Changes to the delegation go through the customer
+
+`delegatedRoleDefinitionIds` lives in the registration the customer deployed. Growing the
+list means the customer's Owner redeploys `lighthouse.bicep`. When a PR adds a role
+assignment to the template, update the list in the same PR and plan for the customer
+touchpoint.

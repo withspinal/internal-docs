@@ -1,0 +1,154 @@
+---
+title: "The deploy job"
+sidebarTitle: "Deploy job"
+description: "How a customer is deployed from GCP: the fleet-deploy Cloud Run Job, what triggers it, and what it runs"
+icon: "play"
+---
+
+Nothing runs on a laptop. A deploy is one execution of the `fleet-deploy` Cloud Run Job in
+the tier project (`spinal-454720`), running as the [fleet identity](/fleet/fleet-identity),
+for one customer. A first launch and every release after it use the same job, because every
+step is an idempotent ensure.
+
+## What runs
+
+```
+gcloud run jobs execute fleet-deploy --args=<slug>
+  └─ container: the toolbox image built from main
+     (worker + pinned az/gcloud/certbot/bicep + THAT commit's infra/ and customers/)
+       └─ python -m src.deploy <slug>          as fleet-worker@spinal-454720
+            readiness → auth0-org → auth0-app → customer-env → service-account
+            → runtime-sa → temporal → tls-cert → full-stack (ARM) → dns → smoke-test
+```
+
+These are the stages of the [launch workflow](/fleet/launch-workflow), executed
+in-process without a Temporal server and without the approval wait. Inside the container,
+gcloud takes its identity from the metadata server and the Azure session is derived from it
+by federation. No secret is mounted.
+
+## The slug is the only input
+
+The argument names the customer folder. `customers/<slug>/target.env` supplies the
+subscription and tenant the job routes into and the Auth0 facts; `params.bicepparam`
+supplies every template parameter. Everything else is derived from the slug: the hostname,
+the Secret Manager entries, the minted GCP and Auth0 identities, the Temporal namespace,
+the resource group, and the ARM deployment name.
+
+<Warning>
+The folder has to be in the image. Being in git is not enough: the image is built from a
+commit on main, so a new folder becomes deployable once the toolbox workflow has rolled an
+image built after that commit. A slug with no folder fails at the readiness check in
+seconds, before any cloud is touched.
+</Warning>
+
+## Running it
+
+There are two ways to start an execution. Both do the same thing.
+
+<Tabs>
+  <Tab title="GitHub (the button)">
+    **Actions** → **Deploy customer** → **Run workflow** → pick the customer.
+
+    The run executes the job, waits for it, and streams the job's log into the GitHub run.
+    Only `main` is deployable. The GitHub environment named after the customer is the
+    approval gate: give it required reviewers and the dispatch waits for a human.
+
+    GitHub holds no cloud credential. The repo federates into `fleet-github`, which may only
+    push the toolbox image, roll and execute this job, and read its log.
+  </Tab>
+  <Tab title="gcloud (the same thing)">
+    ```bash
+    gcloud run jobs execute fleet-deploy \
+      --region europe-west2 --project spinal-454720 \
+      --args=<slug> --wait
+    ```
+
+    `--wait` returns when the execution finishes and exits non-zero on failure. Drop it to
+    get the execution name back immediately.
+  </Tab>
+</Tabs>
+
+### Watching it
+
+The Console: **Cloud Run** → **Jobs** → `fleet-deploy` → **Executions**. Or from a shell:
+
+```bash
+gcloud logging read \
+  'resource.type=cloud_run_job AND resource.labels.job_name=fleet-deploy' \
+  --project spinal-454720 --order=asc --limit 200 \
+  --format='value(timestamp,textPayload)'
+```
+
+The first line the job prints is its identity. It should read
+`gcp=attached/ambient gcloud identity; azure=federated app 6aeaabcb-…`. Each stage logs a
+`── <stage> (<activity>)` line when it starts and `done in Ns` when it finishes.
+
+## What a re-run does
+
+Because every step is an ensure, running the job against an already-launched customer is
+safe and is how a release ships.
+
+| Stage | On an existing customer |
+|-------|-------------------------|
+| readiness | re-checks fleet secrets and `target.env`; fails fast naming any gap |
+| auth0-org | re-verifies the org and its connections |
+| auth0-app | finds `dashboard-<slug>`, converges its config, re-enables it on the org's connections |
+| customer-env | finds `<slug>-env` and leaves it untouched (generate-once) |
+| service-account, runtime-sa | find the accounts, re-apply IAM as no-ops, do not re-mint keys |
+| temporal | finds the namespace and scoped account, does not re-mint the key |
+| tls-cert | skips while the stored cert has more than 30 days left; otherwise reissues |
+| full-stack | one `az deployment sub create`; ARM no-ops unchanged resources and rolls what changed (new image pins create new revisions) |
+| dns | upserts the A record |
+| smoke-test | real TLS request through the front door |
+
+<Note>
+The env blob is generate-once. Its `DB_PASSWORD` is the one Postgres was created with. A
+config change is a new Secret Manager version of `<slug>-env` followed by a deploy, never a
+deletion.
+</Note>
+
+## Releases and new customers
+
+Both are a PR followed by a run of the job.
+
+- **A release** is a PR bumping `imageTag` and `frontendImageTag` in
+  `customers/<slug>/params.bicepparam`. Merging it builds and rolls a new toolbox image.
+  Then run the job for that customer.
+- **A new customer** is a PR adding `customers/<slug>/` and its option in the `customer`
+  choice list of `.github/workflows/deploy.yml`. The toolbox workflow fails the push if the
+  list and the folders disagree. Follow [New customer from zero](/fleet/new-customer).
+
+## Timeouts and retries
+
+The job's task timeout is two hours, enough for a full first launch (Temporal namespace
+creation takes minutes, ARM up to an hour). On failure the task re-runs once. That is safe
+because every step is an ensure and ARM resumes an incremental deployment, and it is
+deliberately bounded because Let's Encrypt locks a hostname out after five failed
+validations in an hour.
+
+If the retry also fails, fix the cause and execute the job again. Completed work is skipped.
+
+## How it got there
+
+Done once per tier and recorded here so it can be redone for the production tier:
+
+<Steps>
+  <Step title="The fleet identity">
+    `./infra/fleet-identity.sh` in `spinal-fleet`, run by a human with project Owner and
+    Entra Global Administrator sessions. Idempotent. See [Fleet identity](/fleet/fleet-identity).
+  </Step>
+  <Step title="The toolbox image">
+    Built and pushed by `.github/workflows/toolbox.yml` on every push to main. The very first
+    image was built by hand on 2026-09-04 (`docker buildx build --platform linux/amd64 --push`)
+    so the job could be created before the workflow had run.
+  </Step>
+  <Step title="The job">
+    `infra/gcp/fleet-deploy.job.yaml` is the job's single source of truth: the service
+    account, the two Azure settings, the timeout and retry. CI substitutes the image tag and
+    applies it with `gcloud run jobs replace`. Editing the job means editing that file.
+  </Step>
+</Steps>
+
+The compose stack on a laptop still runs the same activities as a Temporal worker, and
+`launch.sh` still drives it. That is the [dev loop](/fleet/dev-loop) for working on the
+worker, not the way customers are deployed.
