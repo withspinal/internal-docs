@@ -31,17 +31,64 @@ data and sits in their subscription on their bill.
 
 ## Running it
 
-In GitHub: **Actions** → **Offboard customer** → **Run workflow**. Pick the customer, the
-flavour, and the phase. Leave **confirm** empty for a dry run that prints the inventory and
-changes nothing. Type the slug into **confirm** to apply. The customer's environment gate
-applies, so a reviewer can be required.
+The job has no customer baked in. The slug is the first container argument of each
+execution, followed by the flavour, the phase, and the confirmation. Without
+`--confirm <slug>` the job is a dry run: it prints the inventory and changes nothing.
+Start with that.
 
-The same from a shell:
+<Tabs>
+  <Tab title="GitHub (the button)">
+    **Actions** → **Offboard customer** → **Run workflow**. Pick the customer, the flavour,
+    and the phase. Leave **confirm** empty for a dry run. Type the slug into **confirm** to
+    apply. The customer's environment gate applies, so a reviewer can be required.
+  </Tab>
+  <Tab title="Cloud Console">
+    **Cloud Run** → **Jobs** → `fleet-offboard` → **Execute** → **Execute with overrides**.
+    Under **Container arguments**, add one argument per line.
 
-```bash
-gcloud run jobs execute fleet-offboard --region europe-west2 --project spinal-454720 \
-  --args=<slug>,--flavour,release,--phase,disable,--confirm,<slug> --wait
-```
+    Dry run, inventory only:
+
+    ```
+    littlebrolly
+    ```
+
+    Apply, reversible:
+
+    ```
+    littlebrolly
+    --flavour=release
+    --phase=disable
+    --confirm=littlebrolly
+    ```
+
+    For the other combinations change `release` to `destroy` or `disable` to `purge`.
+    Keep the `--flag=value` form: the slug appears twice, and a repeated bare value is
+    rejected by gcloud. Press **Execute**; the execution and its log appear under the
+    job's **Executions** tab.
+  </Tab>
+  <Tab title="gcloud">
+    Dry run, inventory only:
+
+    ```bash
+    gcloud run jobs execute fleet-offboard --region europe-west2 --project spinal-454720 \
+      --args=<slug> --wait
+    ```
+
+    Apply, reversible:
+
+    ```bash
+    gcloud run jobs execute fleet-offboard --region europe-west2 --project spinal-454720 \
+      --args=<slug>,--flavour=release,--phase=disable,--confirm=<slug> --wait
+    ```
+
+    `--args` is comma-separated: each item becomes one argument. Use the `--flag=value`
+    form, because gcloud rejects a value that appears twice and the slug does.
+  </Tab>
+</Tabs>
+
+Three guard rails: an execution with no arguments fails with a usage message; `--confirm`
+must equal the slug exactly or the job refuses; and the defaults are `release` and
+`disable`, so `destroy` and `purge` only happen when you name them.
 
 The job prints the inventory before and after, and ends with a closing record. Paste that
 record into `customers/<slug>/manifest.md`.
@@ -59,24 +106,81 @@ Steps run in this order. A step not listed for the chosen flavour and phase is s
 | azure-stack | | delete `rg-spinal-<slug>`, purge the soft-deleted vault, delete the deployment record | `destroy` only. The long step, often 30 minutes |
 | gcp-identities | disable both service accounts | remove their IAM bindings, then delete them | Bindings first, or inert `deleted:` entries linger |
 | gcp-secrets | disable every enabled version of the six secrets | delete the six secrets | |
-| lighthouse | | remove the delegation | Last, because it is our own access |
+
+The Lighthouse delegation is not a step. It belongs to the customer, and Spinal holds no
+right to remove it, on purpose. The inventory still shows it, so the closing record says
+whether it is there.
 
 ## Afterwards
 
-Paste the closing record into the manifest, then open a PR that removes `customers/<slug>/`
-and the slug's entry from both choice lists. Git history keeps the folder. That PR is the
-last entry in the customer's operational record.
+Three things, in order.
 
-## Two things to know
+1. Paste the closing record into `customers/<slug>/manifest.md`.
+2. Tell the customer Spinal is finished, and send them the section below. Their Owner
+   removes the Lighthouse delegation and then, if they wish, cancels the subscription.
+3. Open a PR that removes `customers/<slug>/` and the slug's entry from both choice lists.
+   Git history keeps the folder. That PR is the last entry in the customer's operational
+   record.
 
-Both concern access the job needs and may not have.
+## What the customer does
+
+Send this to the customer once the purge run has completed. It is their work, in their
+tenant, and Spinal cannot do it for them.
+
+**Order matters.** Remove the delegation first, then cancel the subscription. A cancelled
+subscription keeps its resources, the delegation included, in a disabled state for up to
+90 days before Azure deletes them. Removing the assignment first ends Spinal's access at
+once and drops the subscription out of Spinal's view immediately.
+
+**Wait for Spinal's confirmation before cancelling.** The offboard job needs the
+subscription reachable to delete the resource group and purge the vault. Spinal's identity
+cannot touch a disabled subscription, so cancelling early strands those resources for the
+90 days.
+
+### 1. Remove the delegation
+
+Sign in to your own tenant with the account that deployed the delegation, an Owner of the
+subscription who is a member of your tenant, not a guest. Check the tenant before going
+further: the delete is refused if it arrives from Spinal's tenant.
+
+```bash
+az login --tenant <your tenant id>
+az account set --subscription <the subscription delegated to Spinal>
+
+# must show YOUR tenant id, not Spinal's 77ed63dd-…
+az account show --query '{user:user.name, tenant:tenantId}' -o table
+
+# the assignment is the delegation itself; this ends Spinal's access immediately
+az managedservices assignment list --query '[].name' -o tsv
+az managedservices assignment delete --assignment <assignment id> --yes
+
+# the definition is the leftover template of that delegation; tidy it too
+az managedservices definition list --query '[].name' -o tsv
+az managedservices definition delete --definition <definition id> --yes
+```
+
+The same in the portal, with your own directory selected: **Service providers** →
+**Service provider offers** → the Spinal entry → **Delete**.
 
 <Warning>
-**The delegation can only be removed by Spinal for customers delegated after 2026-09-07.**
-`lighthouse.bicep` now grants the Registration Assignment Delete role. littlebrolly was
-delegated before that, so its purge run reports the delegation as left in place, and the
-customer's Owner removes it, or redeploys the template first.
+If the delete fails with `InvalidRegistrationAssignmentDeleteRequest` saying the definition
+"does not support deletion from the managing tenant", the command ran in Spinal's tenant.
+That happens when a Spinal account is signed in and the subscription was selected through
+its Lighthouse projection. Sign in with your own tenant's account and check `az account
+show` before retrying.
 </Warning>
+
+### 2. Cancel the subscription, if you want to
+
+With the delegation gone, nothing of Spinal's remains in the subscription. In the portal:
+**Subscriptions** → the subscription → **Cancel subscription**. Azure offers a permanent
+delete a few days after cancellation. Cancelling needs an Owner or the billing account
+admin.
+
+In the `release` flavour the subscription still holds your data in Postgres and blob
+storage, and cancelling it deletes that too. In the `destroy` flavour it is already empty.
+
+## One thing to know
 
 The Auth0 provisioning credential needs `delete:clients` for the app step and
 `delete:organizations` for the `destroy` org step. Both were granted on 2026-09-07.

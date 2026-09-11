@@ -115,7 +115,9 @@ In GitHub: **Actions** → **Deploy customer** → **Run workflow** → pick the
 customer's GitHub environment has required reviewers, approve the run when prompted. The
 job's log streams into the run.
 
-The same thing from a shell:
+The same thing without GitHub. In the Cloud Console: **Cloud Run** → **Jobs** →
+`fleet-deploy` → **Execute** → **Execute with overrides**, with the slug as the single
+container argument. Or from a shell:
 
 ```bash
 gcloud run jobs execute fleet-deploy \

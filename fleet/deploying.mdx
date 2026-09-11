@@ -49,13 +49,17 @@ If the customer's GitHub environment has required reviewers, the run waits for a
 Then it executes the job for that slug, waits for it, and streams the job's log into the
 run. This is the moment a customer's environment changes.
 
-The same thing from a shell, if GitHub is unavailable:
+The same thing without GitHub. In the Cloud Console: **Cloud Run** → **Jobs** →
+`fleet-deploy` → **Execute** → **Execute with overrides**, and add the slug as the single
+container argument. Or from a shell:
 
 ```bash
 gcloud run jobs execute fleet-deploy \
   --region europe-west2 --project spinal-454720 \
   --args=<slug> --wait
 ```
+
+The job has no customer baked in; the slug you pass is what selects `customers/<slug>/`.
 
 ## What the job does
 

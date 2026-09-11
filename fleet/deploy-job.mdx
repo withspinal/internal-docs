@@ -43,7 +43,9 @@ seconds, before any cloud is touched.
 
 ## Running it
 
-There are two ways to start an execution. Both do the same thing.
+The job has no customer baked in. The slug is the first container argument of each
+execution, and everything else is derived from it. Three ways to start one; all do the
+same thing.
 
 <Tabs>
   <Tab title="GitHub (the button)">
@@ -56,7 +58,18 @@ There are two ways to start an execution. Both do the same thing.
     GitHub holds no cloud credential. The repo federates into `fleet-github`, which may only
     push the toolbox image, roll and execute this job, and read its log.
   </Tab>
-  <Tab title="gcloud (the same thing)">
+  <Tab title="Cloud Console">
+    **Cloud Run** → **Jobs** → `fleet-deploy` → **Execute** → **Execute with overrides**.
+    Under **Container arguments**, add one argument: the slug.
+
+    ```
+    littlebrolly
+    ```
+
+    Leave everything else as it is and press **Execute**. The execution appears under the
+    job's **Executions** tab with its log.
+  </Tab>
+  <Tab title="gcloud">
     ```bash
     gcloud run jobs execute fleet-deploy \
       --region europe-west2 --project spinal-454720 \
@@ -67,6 +80,9 @@ There are two ways to start an execution. Both do the same thing.
     get the execution name back immediately.
   </Tab>
 </Tabs>
+
+An execution with no arguments fails with a usage message. A slug with no folder in the
+image fails at the readiness check before anything is touched.
 
 ### Watching it
 
