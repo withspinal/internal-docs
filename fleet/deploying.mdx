@@ -1,26 +1,24 @@
 ---
-title: "How deployment works"
-sidebarTitle: "How deployment works"
-description: "The two-step model: a push to main prepares, a button press deploys. Read this first."
+title: "Ship a change"
+sidebarTitle: "Ship a change"
+description: "How a change reaches a customer: merge to main, then press the button. The steps for a release."
 icon: "route"
 ---
 
-Deploying a customer is two steps, and they are deliberately separate. A push to `main`
-prepares and changes no customer environment. Pressing a button deploys one customer.
-Everything runs inside GCP as the fleet identity. Nothing runs on a laptop.
+Two steps, kept deliberately apart. Merging to `main` prepares and changes no customer.
+Pressing the button deploys one customer. Everything runs inside GCP as the fleet identity.
 
 ```
  you                          GitHub Actions                       GCP
  ───                          ──────────────                       ───
- merge a PR to main  ──────▶  toolbox.yml                          
-                              • choice list == customers/ ?        
-                              • worker tests                       
+ merge a PR to main  ──────▶  toolbox.yml
+                              • worker tests
                               • build toolbox image @ sha  ──────▶ Artifact Registry  fleet/toolbox:<sha>
-                              • gcloud run jobs replace    ──────▶ Cloud Run Job  fleet-deploy  (now on <sha>)
+                              • gcloud run jobs replace    ──────▶ Cloud Run Jobs  fleet-deploy, fleet-offboard
 
- Actions ▶ Deploy customer                                         
- pick a slug ▶ Run   ──────▶  deploy.yml                           
-                              • wait for reviewer (if set)         
+ Actions ▶ Deploy customer
+ pick a slug ▶ Run   ──────▶  deploy.yml
+                              • wait for reviewer (if set)
                               • gcloud run jobs execute    ──────▶ fleet-deploy --args=<slug>
                               • stream the job log                    as fleet-worker:
                                                                       readiness → auth0 → env → identities
@@ -31,86 +29,57 @@ Everything runs inside GCP as the fleet identity. Nothing runs on a laptop.
                                                                    (through Lighthouse)
 ```
 
-## Step 1: push to main prepares
+## To ship a new build
 
-Every push to `main` runs the **toolbox** workflow. It checks that the customer choice list
-in `deploy.yml` matches the folders in `customers/`, runs the worker's tests, builds the
-toolbox image from that commit, and points the `fleet-deploy` Cloud Run Job at it.
+These are the five steps. The first three prepare, the last two deploy and confirm.
 
-The image contains the worker, the pinned CLIs, and that commit's `infra/` and
-`customers/`. So after the workflow goes green, the job knows exactly what `main` knows,
-and nothing else. No customer environment has changed.
+1. Find the image tags in the Cloud Console under **Artifact Registry** → `dashboard` →
+   `backend` and `frontend`: open the image tagged `latest` and copy its sha tag. Never pin
+   `latest` itself. If you prefer a command:
 
-## Step 2: the button deploys one customer
+   ```bash
+   gcloud artifacts docker images list \
+     europe-west2-docker.pkg.dev/spinal-454720/dashboard/backend \
+     --include-tags --filter="tags~latest" --format="value(tags)"
+   gcloud artifacts docker images list \
+     europe-west2-docker.pkg.dev/spinal-454720/dashboard/frontend \
+     --include-tags --filter="tags~latest" --format="value(tags)"
+   ```
 
-In GitHub: **Actions** → **Deploy customer** → **Run workflow** → pick the customer.
+2. Set `imageTag` and `frontendImageTag` in `customers/<slug>/params.bicepparam`.
+3. Open a PR and merge it. You should see the "Toolbox image" workflow go green. Until it
+   does, the merged pins are not deployable: the button always runs what `main` last rolled.
+4. **Actions** → **Deploy customer** → **Run workflow**, type `<slug>`, and run it.
+   Approve if the environment asks. Without GitHub, use **Cloud Run** → **Jobs** → `fleet-deploy` →
+   **Execute** → **Execute with overrides** with `<slug>` as the only argument, or:
 
-If the customer's GitHub environment has required reviewers, the run waits for approval.
-Then it executes the job for that slug, waits for it, and streams the job's log into the
-run. This is the moment a customer's environment changes.
+   ```bash
+   gcloud run jobs execute fleet-deploy \
+     --region europe-west2 --project spinal-454720 --args=<slug> --wait
+   ```
 
-The same thing without GitHub. In the Cloud Console: **Cloud Run** → **Jobs** →
-`fleet-deploy` → **Execute** → **Execute with overrides**, and add the slug as the single
-container argument. Or from a shell:
+5. Watch the log. On an existing customer the minting steps skip and the run takes about
+   five minutes, most of it the ARM deployment rolling new Container App revisions. It
+   ends with `smoke-test done` and `deploy <slug> OK`.
 
-```bash
-gcloud run jobs execute fleet-deploy \
-  --region europe-west2 --project spinal-454720 \
-  --args=<slug> --wait
-```
+## Other kinds of change
 
-The job has no customer baked in; the slug you pass is what selects `customers/<slug>/`.
-
-## What the job does
-
-The slug picks the folder: `customers/<slug>/` supplies the subscription to route into and
-every template parameter. The job then runs the whole chain: readiness, Auth0, env,
-identities, certificate, the ARM deployment, DNS, smoke test.
-
-Every step is an idempotent ensure. On a customer that already exists, the minting steps
-find their work done and skip; the ARM deployment changes only what the commit changed.
-This is why one job serves both a first launch and every release, and why re-running after
-a failure is always safe. A full run on an existing customer takes about five minutes.
-
-## What to do for each kind of change
-
-Every change is a PR first. The right-hand column is what you do once its toolbox
-workflow is green.
+The steps are the same; only the PR differs.
 
 | You want to | The PR | After it goes green |
 |---|---|---|
-| Ship a new backend or frontend build to a customer | bump `imageTag` / `frontendImageTag` in `customers/<slug>/params.bicepparam` | deploy that customer; ARM rolls new Container App revisions |
 | Change the infrastructure template | edit `infra/azure/*.bicep` | deploy each customer you want on it, one at a time |
 | Change the worker or the identity code | edit `worker/` | nothing; the next deploy uses it |
-| Add a customer | add `customers/<slug>/` and its option in `deploy.yml`; see [New customer from zero](/fleet/new-customer) | deploy the new slug; the first run is the launch |
-| Change the job itself (timeout, memory) | edit `infra/gcp/fleet-deploy.job.yaml` | nothing; the push replaced the job |
-| Roll a config value | add a new Secret Manager version of `<slug>-env`, no PR needed | deploy that customer; the ARM run re-seeds the vault and restarts |
+| Roll a config value | add a new Secret Manager version of `<slug>-env`, no PR needed | deploy that customer; the run re-seeds the vault and restarts the apps |
+| Change the job itself, such as timeout or memory | edit `infra/gcp/*.job.yaml` | nothing; the push replaced the job |
+| Add a customer | see [Launch a customer](/fleet/new-customer) | deploy the new slug; the first run is the launch |
 
-<Warning>
-A merged PR is not deployable until its toolbox workflow has gone green. The button always
-runs whatever `main` last rolled into the job.
-</Warning>
+## When it fails
 
-## Who does what
+The log names the stage that failed and the error after it. Fix the cause and press the
+button again; every step is safe to re-run and completed stages skip. Details on retries,
+timeouts, and what each stage does on a re-run are in
+[Deploy job internals](/fleet/deploy-job).
 
-Three identities take part, and none of them is a person holding a cloud credential.
-
-| Identity | Used by | May |
-|---|---|---|
-| `fleet-github` | the two GitHub workflows | push the image, replace and execute the job, read its log |
-| `fleet-worker` | the job while it runs | everything the deploy needs, in GCP directly and in Azure by federation |
-| you | pressing the button | nothing in the clouds; GitHub holds no cloud secret |
-
-Why this shape works, and how it was set up, is in [Fleet identity](/fleet/fleet-identity).
-
-## When something fails
-
-The GitHub run shows the job's log. Find the last `── <stage>` line to see which step
-failed, and the error after it. Fix the cause, then run the deploy again; completed stages
-skip. Details, timeouts, and the retry behaviour are in [Deploy job](/fleet/deploy-job).
-
-## What is not part of this
-
-The compose stack on a laptop (`launch.sh`, Temporal) runs the same activities for
-developing the worker. It is the [dev loop](/fleet/dev-loop), not a way to deploy
-customers.
+The compose stack on a laptop runs the same steps for developing the worker. It is the
+[dev loop](/fleet/dev-loop), never the way a customer is deployed.

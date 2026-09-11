@@ -28,10 +28,24 @@ machine-written. Plain words, specific facts, real names.
   enhance, facilitate, streamline.
 - Define a term once, on first use, then use that same term every time. Do not vary
   words for style; "elegant variation" makes a reader wonder if you mean something new.
+- Write it the way you would say it to a colleague. "The three things you'll need are",
+  not "Three things, and none of them is Docker." A clipped fragment or a clever turn of
+  phrase under a heading reads as machine-written. Full, plain sentences.
 - Concrete beats abstract. Name the file, the command, the error text, the resource.
   Commands go in code blocks. File names, paths, and flags go in backticks.
 - Numbers that change what the reader does go in a table or on their own line. Numbers
   that do not, go.
+
+## Prerequisites and claims
+
+- List only what the reader truly needs, and check each item against how the process
+  actually runs. Deploys and offboards run as GCP jobs; a local `az` or `gcloud` session
+  is a convenience for a lookup, never a prerequisite, and the docs must not say otherwise.
+- If a step can be done in a console, say so before offering the CLI command.
+- Runbooks are timeless and customer-free. Never refer to a previous run, a specific
+  customer, or a date in a page that tells the reader what to do. Use `<slug>` as the
+  placeholder in every example, including console argument lists. History belongs in the
+  customer's manifest, not in the docs.
 
 ## Jargon
 

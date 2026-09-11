@@ -1,42 +1,39 @@
 ---
-title: "New customer from zero"
-sidebarTitle: "New customer: from 0"
-description: "The complete checklist for launching a new customer. Follow top to bottom."
-icon: "list-check"
+title: "Launch a customer"
+sidebarTitle: "Launch a customer"
+description: "From contract signed to a live dashboard, step by step. Also how to relaunch a customer you offboarded."
+icon: "rocket"
 ---
 
-Follow this in order when a new customer signs. Commands are copy-pasteable after
-replacing `<slug>` and the customer ids. Background for any step is in
-[Customer onboarding](/fleet/customer-onboarding) and the deep dives.
+Do these steps in order. Replace `<slug>` and the customer ids as you go. Each step says
+what you should see before moving on.
 
-## 0. Preconditions
+## What you need
 
-Verify rather than set up; all of this exists already for the current tier.
-
-```bash
-# Spinal-tenant az session and gcloud session both alive
-az account show --query "{tenant:tenantId, user:user.name}"
-gcloud auth list --filter=status:ACTIVE --format="value(account)"
-
-# the six fleet secrets exist (the readiness gate will re-check)
-gcloud secrets list --project spinal-454720 --filter="name~fleet-" --format="value(name)"
-```
-
-The deploy itself runs in GCP (see [Deploy job](/fleet/deploy-job)), so nothing here needs
-Docker or a long-lived laptop session. The `az` session is for verifying the delegation in
-step 2; the gcloud session is for resolving image pins and, optionally, running the job by
-hand.
+You need write access to the `spinal-fleet` GitHub repo, and access to the Azure and GCP
+consoles for two lookups along the way. Nothing runs on your laptop: every command that
+touches a cloud runs as a GCP job.
 
 ## 1. Choose the slug
 
-Lowercase, letters and digits, 12 characters maximum. The slug becomes the public
-hostname `dashboard.<slug>.withspinal.com` and every resource name, and it is permanent.
-Limits are explained in [Naming limits](/fleet/naming-limits).
+Lowercase letters and digits, twelve characters at most. It becomes
+`dashboard.<slug>.withspinal.com` and every resource name, and it cannot be changed after
+launch. Check it is not already a folder in `customers/`.
 
-## 2. Customer runs the Lighthouse deployment
+## 2. The customer delegates a subscription
 
-Send `infra/azure/lighthouse.bicep` to their IT admin with the instruction to run, as an
-Owner of the target subscription, with that subscription selected:
+The customer gives Spinal access to one Azure subscription through Lighthouse. They run one
+command in their tenant. We never sign in to their tenant and no credentials change hands.
+
+Send their IT admin `infra/azure/lighthouse.bicep` with this wording: it grants Spinal's
+`fleet-operators` group Contributor plus a narrow role-assignment right on one
+subscription; it appears in their portal under **Service providers**; they can revoke it
+there at any time without involving us.
+
+Deploying that file is what creates the delegation. It contains only the two Lighthouse
+registration resources and nothing else; the product itself is deployed later, in step 5,
+by our job. They run it from the folder holding the file, as an Owner of that subscription,
+with an account that is a member of their directory, not a guest:
 
 ```bash
 az login
@@ -46,37 +43,52 @@ az deployment sub create --location uksouth \
   --parameters fleetPrincipalId=44fc7db9-dfb0-4d0a-9cb2-cfa7bc5cd423
 ```
 
-Ask for the command's JSON output back. From it, note the subscription id (it appears in
-every resource id). Look up their tenant id yourself:
+<Note>
+**What this does.** The command finishes in under a minute and prints a block of JSON
+describing the two Lighthouse resources it created. That is all it has done: Spinal's
+`fleet-operators` group can now act in this subscription. Nothing has been built in it.
+The dashboard, the database, and everything else arrive in step 5, when we run the deploy
+job from our side.
+</Note>
 
-```bash
-curl -s https://login.microsoftonline.com/<their-domain>/v2.0/.well-known/openid-configuration \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['issuer'].split('/')[3])"
-```
+<Warning>
+`az deployment sub create` targets whatever subscription is active in their CLI. An admin
+with several subscriptions can delegate the wrong one without noticing. Treat the
+`az account set` line as required, and check that the subscription that appears on our
+side is the one you agreed on.
+</Warning>
 
-Then verify the delegation from your own session:
+When they tell you it ran, open the Azure portal signed in to Spinal's tenant and go to
+**Azure Lighthouse** → **My customers** → **Customers**. Their subscription appears there
+within a few minutes, delegated to `fleet-operators`, with the two values you need for
+step 4: the subscription id and their tenant id. Nothing needs to come back from the
+customer.
 
-```bash
-az account list --refresh --query "[?id=='<their-sub-id>'].managedByTenants"
-# Spinal's tenant id 77ed63dd-da72-44f6-b13a-3ea39a7b5abf must appear
-```
+## 3. Create the Auth0 organisation
 
-## 3. Create the Auth0 Organization
+In the shared Auth0 tenant `dev-48ptaf8df3jya1dz`, create an Organization for the customer
+and enable at least one connection on it. Note the `org_…` id. Do not create an
+application; the launch mints one per customer. Background in [Auth0](/fleet/auth0).
 
-In the shared Auth0 tenant (`dev-48ptaf8df3jya1dz`): create an Organization for the
-customer and attach at least one connection. Note the `org_…` id. The launch fails fast if
-the org is missing or has no connections. Do not create an application; the launch mints
-one. See [Auth0](/fleet/auth0).
+You should see the organisation with one or more connections enabled. The launch fails at
+its first step if the org is missing or has none.
 
-## 4. Author the customer folder
+## 4. Add the customer folder
 
-```bash
-mkdir customers/<slug>
-```
+One pull request does all of this: it adds the customer's folder. Take it in order.
 
-Create four files, copying the shape from `customers/littlebrolly/`:
+### Copy an existing folder
 
-`target.env`: the declared facts:
+Copy any existing customer folder in `customers/` to `customers/<slug>/`. The folder has
+four files. Two of them need editing. The other two, `env.schema` and `manifest.md`, need
+nothing: `env.schema` is the same for every customer, and `manifest.md` is a notebook for
+anything worth remembering about this customer, which no code reads.
+
+### Edit target.env
+
+This file holds the facts about the customer. Put in the subscription id and tenant id
+from step 2 and the organisation id from step 3. The three Auth0 lines below them stay as
+they are.
 
 ```bash
 SUBSCRIPTION_ID=<from step 2>
@@ -87,9 +99,24 @@ AUTH0_TENANT_DOMAIN=dev-48ptaf8df3jya1dz.uk.auth0.com
 AUTH0_MGMT_CLIENT_ID=KYl5o1pqcflTzOV6V2TsKh39RJJrNaXr
 ```
 
-`params.bicepparam`: copy littlebrolly's, change `customerSlug` and `publicHostName`,
-then resolve fresh image pins (pin the sha tag shown alongside `latest`, never `latest`
-itself):
+### Edit params.bicepparam
+
+This file holds the settings the deployment is built from. Change these lines:
+
+- `customerSlug`: the slug.
+- `publicHostName`: `dashboard.<slug>.withspinal.com`.
+- `imageTag` and `frontendImageTag`: which build of the backend and of the frontend this
+  customer runs.
+
+The two image tags deserve a word. Every build of the backend and the frontend is
+published to Artifact Registry under its git commit sha, and the newest build also
+carries the tag `latest`. A customer's file must name a commit sha, never `latest`, so
+that the file always means one exact build and a newer build appearing later cannot
+change what the customer runs.
+
+To use the newest build, find its sha in the Cloud Console: **Artifact Registry** →
+`dashboard` → `backend`, open the image tagged `latest`, and copy the long sha tag it also
+carries. Do the same under `frontend`. If you would rather use a command:
 
 ```bash
 gcloud artifacts docker images list \
@@ -100,61 +127,74 @@ gcloud artifacts docker images list \
   --include-tags --filter="tags~latest" --format="value(tags)"
 ```
 
-`env.schema`: copy as-is (the key set is fixed by `compose_customer_env`).
+### Merge and wait for the build
 
-`manifest.md`: record the facts gathered so far; the launch fills in the rest.
+Open the pull request and merge it. You should see the "Toolbox image" workflow start and
+go green. That run builds the image containing the new folder and points the jobs at it.
+Do not continue until it is green; until then the jobs do not know the customer exists.
 
-Add the slug to the `customer` choice list in `.github/workflows/deploy.yml`; CI fails the
-push if that list and `customers/` disagree. Open a PR and merge it. The push to main runs
-the toolbox workflow, which builds the image with the new folder in it and rolls the
-`fleet-deploy` job. Wait for that workflow to go green before step 5.
+### Optional: check the delegation from our side
+
+Before deploying, you can confirm the job can reach the customer's subscription without
+changing anything. Run the offboard job as a dry run: **Cloud Run** → **Jobs** →
+`fleet-offboard` → **Execute** → **Execute with overrides**, with `<slug>` as the only
+argument. In its log, the Azure rows should read `absent`, meaning the job reached the
+subscription and found no resource group yet. `unreachable` means the delegation is not
+in place.
 
 ## 5. Deploy
 
-In GitHub: **Actions** → **Deploy customer** → **Run workflow** → pick the slug. If the
-customer's GitHub environment has required reviewers, approve the run when prompted. The
-job's log streams into the run.
+In GitHub: **Actions** → **Deploy customer** → **Run workflow**, type `<slug>` into the
+customer box, and run it. The workflow refuses a slug that has no folder at that commit.
+If the customer's environment has required reviewers, approve when prompted.
 
-The same thing without GitHub. In the Cloud Console: **Cloud Run** → **Jobs** →
-`fleet-deploy` → **Execute** → **Execute with overrides**, with the slug as the single
-container argument. Or from a shell:
+Without GitHub, in the Cloud Console: **Cloud Run** → **Jobs** → `fleet-deploy` →
+**Execute** → **Execute with overrides**, with `<slug>` as the single container argument.
+Or:
 
 ```bash
 gcloud run jobs execute fleet-deploy \
-  --region europe-west2 --project spinal-454720 \
-  --args=<slug> --wait
+  --region europe-west2 --project spinal-454720 --args=<slug> --wait
 ```
 
-A first launch takes 30 to 90 minutes, most of it in the `full-stack` stage. Watch it in
-the Console under **Cloud Run** → **Jobs** → `fleet-deploy` → **Executions**.
+A first launch takes 30 to 90 minutes, nearly all of it in the `full-stack` stage. The
+log streams into the GitHub run, or watch it under **Cloud Run** → **Jobs** →
+`fleet-deploy` → **Executions**. You should see each stage log `done`, ending with
+`smoke-test done` and `deploy <slug> OK`.
 
-If it fails, read the log for the failing stage, fix the cause, and run it again; completed
-stages skip. Triage notes live in [Deploy job](/fleet/deploy-job) and
-[Launch workflow](/fleet/launch-workflow).
-
-<Note>
-`./launch.sh <slug>` runs the same chain from a laptop through the compose Temporal stack,
-with an approve signal. Use it for developing the worker, not for launching customers.
-</Note>
+If it fails, the log names the stage. Fix the cause and run the deploy again; completed
+stages skip. [Deploy job internals](/fleet/deploy-job) has the retry and timeout details.
 
 ## 6. Verify
 
-```bash
-curl -sS -o /dev/null -w "%{http_code}\n" https://dashboard.<slug>.withspinal.com/
-```
-
-A TLS error here usually means your local network is intercepting the new domain, not
-that the deployment is broken; check the issuer first (see
-[Dev loop](/fleet/dev-loop)).
+Open `https://dashboard.<slug>.withspinal.com/` in a browser. You should see the login
+page. The job's smoke test already made the same request from GCP, so if the browser
+shows a certificate error while the job passed, your local network is intercepting the
+new domain; the deployment is fine. [Dev loop](/fleet/dev-loop) explains how to tell.
 
 ## 7. First login
 
-Send the first org invitation from the Auth0 dashboard (or the Management API). The
-backend upserted the customer's Group row at boot, so the invited user can sign in
-immediately.
+Send the first invitation from the Auth0 organisation. The backend created the customer's
+group at boot, so the invited user can sign in at once.
 
 ## 8. Close out
 
-Update `manifest.md` with the launch outputs (minted identities, namespace, dates), set
-the status line, and commit. The folder is the customer's operational record; keep it
-true.
+Nothing is required. The record of what exists is derived, not written: run the offboard
+job as a dry run at any time and it lists every resource the customer has, in every
+system. If there is something worth remembering that no system holds, such as who the
+customer's admin is or a date agreed with them, put it in `manifest.md` and commit.
+
+## Relaunching a customer you offboarded
+
+After a `destroy` offboard the folder still exists but most of what it pointed at is gone.
+The launch is the same job and it recreates everything, so the differences are small:
+
+1. Step 2 again if the customer removed the delegation or the subscription. A new
+   subscription means a new `SUBSCRIPTION_ID`.
+2. Step 3 again: the offboard deleted the organisation. Create a new one, enable the
+   existing connection on it, and put the new `AUTH0_ORG_ID` in `target.env`.
+3. Refresh the image pins if you want the current build.
+4. Merge that PR, wait for the "Toolbox image" workflow to go green, and deploy.
+
+The job regenerates the env secret, the service accounts and their keys, the certificate,
+and the DNS record. The database is new too, so the regenerated password is fine.

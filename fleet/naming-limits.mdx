@@ -10,6 +10,8 @@ tightest downstream limit. The template enforces `@maxLength(12)`.
 
 ## The budgets
 
+Each derived name has a formula and a hard limit. The tightest of them is what caps the slug.
+
 | Derived name | Formula | Azure/GCP limit | Slug ceiling |
 |---|---|---|---|
 | Key Vault | `kv-<slug>-<8-char suffix>` | 24 (globally unique DNS name) | 12 |

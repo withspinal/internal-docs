@@ -38,7 +38,7 @@ Start with that.
 
 <Tabs>
   <Tab title="GitHub (the button)">
-    **Actions** → **Offboard customer** → **Run workflow**. Pick the customer, the flavour,
+    **Actions** → **Offboard customer** → **Run workflow**. Type the slug, pick the flavour
     and the phase. Leave **confirm** empty for a dry run. Type the slug into **confirm** to
     apply. The customer's environment gate applies, so a reviewer can be required.
   </Tab>
@@ -49,16 +49,16 @@ Start with that.
     Dry run, inventory only:
 
     ```
-    littlebrolly
+    <slug>
     ```
 
     Apply, reversible:
 
     ```
-    littlebrolly
+    <slug>
     --flavour=release
     --phase=disable
-    --confirm=littlebrolly
+    --confirm=<slug>
     ```
 
     For the other combinations change `release` to `destroy` or `disable` to `purge`.
@@ -113,14 +113,13 @@ whether it is there.
 
 ## Afterwards
 
-Three things, in order.
+Do these three things, in this order.
 
 1. Paste the closing record into `customers/<slug>/manifest.md`.
 2. Tell the customer Spinal is finished, and send them the section below. Their Owner
    removes the Lighthouse delegation and then, if they wish, cancels the subscription.
-3. Open a PR that removes `customers/<slug>/` and the slug's entry from both choice lists.
-   Git history keeps the folder. That PR is the last entry in the customer's operational
-   record.
+3. Open a PR that removes `customers/<slug>/`. Git history keeps the folder. That PR is
+   the last entry in the customer's operational record.
 
 ## What the customer does
 
@@ -183,4 +182,4 @@ storage, and cancelling it deletes that too. In the `destroy` flavour it is alre
 ## One thing to know
 
 The Auth0 provisioning credential needs `delete:clients` for the app step and
-`delete:organizations` for the `destroy` org step. Both were granted on 2026-09-07.
+`delete:organizations` for the `destroy` org step. Both are in place.
