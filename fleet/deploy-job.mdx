@@ -1,7 +1,7 @@
 ---
-title: "The deploy job"
-sidebarTitle: "Deploy job"
-description: "How a customer is deployed from GCP: the fleet-deploy Cloud Run Job, what triggers it, and what it runs"
+title: "Deploy job internals"
+sidebarTitle: "Deploy job internals"
+description: "What the fleet-deploy Cloud Run Job runs, what a re-run does, its retries and timeouts, and how it was bootstrapped"
 icon: "play"
 ---
 
@@ -43,46 +43,12 @@ seconds, before any cloud is touched.
 
 ## Running it
 
-The job has no customer baked in. The slug is the first container argument of each
-execution, and everything else is derived from it. Three ways to start one; all do the
-same thing.
-
-<Tabs>
-  <Tab title="GitHub (the button)">
-    **Actions** → **Deploy customer** → **Run workflow** → pick the customer.
-
-    The run executes the job, waits for it, and streams the job's log into the GitHub run.
-    Only `main` is deployable. The GitHub environment named after the customer is the
-    approval gate: give it required reviewers and the dispatch waits for a human.
-
-    GitHub holds no cloud credential. The repo federates into `fleet-github`, which may only
-    push the toolbox image, roll and execute this job, and read its log.
-  </Tab>
-  <Tab title="Cloud Console">
-    **Cloud Run** → **Jobs** → `fleet-deploy` → **Execute** → **Execute with overrides**.
-    Under **Container arguments**, add one argument: the slug.
-
-    ```
-    littlebrolly
-    ```
-
-    Leave everything else as it is and press **Execute**. The execution appears under the
-    job's **Executions** tab with its log.
-  </Tab>
-  <Tab title="gcloud">
-    ```bash
-    gcloud run jobs execute fleet-deploy \
-      --region europe-west2 --project spinal-454720 \
-      --args=<slug> --wait
-    ```
-
-    `--wait` returns when the execution finishes and exits non-zero on failure. Drop it to
-    get the execution name back immediately.
-  </Tab>
-</Tabs>
-
-An execution with no arguments fails with a usage message. A slug with no folder in the
-image fails at the readiness check before anything is touched.
+The runbooks carry the commands: [Launch a customer](/fleet/new-customer) for a first run,
+[Ship a change](/fleet/deploying) for a release. In short, the slug is the first container
+argument of an execution, from the GitHub button, the Cloud Console's **Execute with
+overrides**, or `gcloud run jobs execute fleet-deploy --args=<slug>`. An execution with no
+arguments fails with a usage message; a slug with no folder in the image fails at the
+readiness check before anything is touched.
 
 ### Watching it
 
@@ -130,9 +96,9 @@ Both are a PR followed by a run of the job.
 - **A release** is a PR bumping `imageTag` and `frontendImageTag` in
   `customers/<slug>/params.bicepparam`. Merging it builds and rolls a new toolbox image.
   Then run the job for that customer.
-- **A new customer** is a PR adding `customers/<slug>/` and its option in the `customer`
-  choice list of `.github/workflows/deploy.yml`. The toolbox workflow fails the push if the
-  list and the folders disagree. Follow [New customer from zero](/fleet/new-customer).
+- **A new customer** is a PR adding `customers/<slug>/`. The workflows take the slug as
+  text and check the folder exists at that commit. Follow
+  [Launch a customer](/fleet/new-customer).
 
 ## Timeouts and retries
 

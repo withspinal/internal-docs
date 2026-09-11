@@ -25,24 +25,23 @@
             "group": "Operating the fleet",
             "pages": [
               "fleet/overview",
-              "fleet/deploying",
-              "fleet/what-is-created",
-              "fleet/offboarding",
               "fleet/new-customer",
-              "fleet/customer-onboarding",
-              "fleet/deploy-job",
-              "fleet/launch-workflow"
+              "fleet/deploying",
+              "fleet/offboarding"
             ]
           },
           {
             "group": "Deep dives",
             "pages": [
+              "fleet/what-is-created",
+              "fleet/deploy-job",
               "fleet/fleet-identity",
+              "fleet/launch-workflow",
+              "fleet/dev-loop",
               "fleet/auth0",
               "fleet/secrets",
               "fleet/lighthouse-constraints",
-              "fleet/naming-limits",
-              "fleet/dev-loop"
+              "fleet/naming-limits"
             ]
           }
         ]
