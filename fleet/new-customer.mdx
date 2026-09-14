@@ -58,11 +58,23 @@ with several subscriptions can delegate the wrong one without noticing. Treat th
 side is the one you agreed on.
 </Warning>
 
-When they tell you it ran, open the Azure portal signed in to Spinal's tenant and go to
-**Azure Lighthouse** → **My customers** → **Customers**. Their subscription appears there
-within a few minutes, delegated to `fleet-operators`, with the two values you need for
-step 4: the subscription id and their tenant id. Nothing needs to come back from the
-customer.
+When they tell you it ran, the delegated subscription becomes visible from Spinal's side
+within a few minutes, and that is where you read its id. Nothing needs to come back from
+the customer.
+
+In the Azure portal, signed in to Spinal's tenant: **Azure Lighthouse** → **My customers**
+→ **Customers**. The customer appears with their delegation, and the subscription id is on
+it. Or run this in [Azure Cloud Shell](https://shell.azure.com) in Spinal's tenant, which
+prints every delegated subscription with the line ready for step 4:
+
+```bash
+az account list --refresh \
+  --query "[?managedByTenants[?tenantId=='77ed63dd-da72-44f6-b13a-3ea39a7b5abf']].{customer:name, SUBSCRIPTION_ID:id}" \
+  -o table
+```
+
+The customer's tenant id is not needed anywhere: the deployment reads it from the
+subscription itself.
 
 ## 3. Create the Auth0 organisation
 
@@ -86,13 +98,11 @@ anything worth remembering about this customer, which no code reads.
 
 ### Edit target.env
 
-This file holds the facts about the customer. Put in the subscription id and tenant id
-from step 2 and the organisation id from step 3. The three Auth0 lines below them stay as
-they are.
+This file holds the facts about the customer. Put in the subscription id from step 2 and
+the organisation id from step 3. The three Auth0 lines below them stay as they are.
 
 ```bash
 SUBSCRIPTION_ID=<from step 2>
-TENANT_ID=<from step 2>
 AUTH0_ORG_ID=<from step 3>
 AUTH0_DOMAIN=auth.withspinal.com
 AUTH0_TENANT_DOMAIN=dev-48ptaf8df3jya1dz.uk.auth0.com
@@ -190,7 +200,7 @@ After a `destroy` offboard the folder still exists but most of what it pointed a
 The launch is the same job and it recreates everything, so the differences are small:
 
 1. Step 2 again if the customer removed the delegation or the subscription. A new
-   subscription means a new `SUBSCRIPTION_ID`.
+   subscription means a new `SUBSCRIPTION_ID`, read from Spinal's side as in step 2.
 2. Step 3 again: the offboard deleted the organisation. Create a new one, enable the
    existing connection on it, and put the new `AUTH0_ORG_ID` in `target.env`.
 3. Refresh the image pins if you want the current build.
