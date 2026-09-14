@@ -1,0 +1,21 @@
+fleet/new-customer.mdx
+  s_f2fb605dfdad76::t_f4bc95434eec4c 61-77,101-102,203
+fleet/overview.mdx
+  s_f2fb605dfdad76::t_ab9a6cea5d8f32 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "20b0a8feb6cf80ab07a975d5ce07841b56b53f50",
+  "prompts": {},
+  "sessions": {
+    "s_f2fb605dfdad76": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82a69a88-2add-48d2-b370-f0d51c55abc8",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andrew van Rensburg <andrew@withspinal.com>"
+    }
+  }
+}
