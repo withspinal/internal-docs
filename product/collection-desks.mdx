@@ -1,0 +1,136 @@
+---
+title: "Collection desks"
+sidebarTitle: "Collection desks"
+description: "What a desk is, what it is made of, the two rules the database enforces, and how a group gets its first one"
+icon: "inbox"
+---
+
+A collection desk is the container a collections team works in. Read this page before you
+touch the desk tables, the desk settings pages, or anything that routes a customer email
+or a chase to a person. After it you will know what a desk owns, what it does not, and
+what has to exist before a group can create one.
+
+## What a desk is
+
+A desk is one shared inbound mailbox with a team, a set of business units, and the
+addresses the team sends from. Customers write to the mailbox and collectors copy it, so
+the mailbox is the desk's identity and its thread of record. A customer who owes several
+business units on one desk is chased once, with one total itemised per unit. That roll-up
+is the point of the desk: without it, a customer hears from Spinal once per business unit.
+
+A desk is group-level configuration. It sits above the business unit and below the group,
+and it is the unit of chasing and of inbox scope. Business-unit grants keep scoping the
+other pages (customers, transactions, reporting). Inside a desk, membership is the only
+scope.
+
+## What a desk is made of
+
+| Part | What it is | Where it comes from |
+|------|------------|---------------------|
+| Name | Shown to the team in the desk switcher. Customers never see it. | Typed once. Unique per group, case-insensitive. |
+| Inbound mailbox | The shared mailbox the desk reads. Its identity and thread of record. | A connected shared mailbox, read through the group's Entra app. |
+| Business units | The desk's book: the units it chases as one. | Ticked from the group's business units. A unit is on one desk at most. |
+| Members | The people who can see the desk's inbox, each as a manager or a member. | Added by email. A row links to a user when that person is already admitted to the group. |
+| Outbound channels | The addresses the desk may send from. | Picked from the group's send-enabled mailboxes only. |
+
+Accounts, collectors and contacts are not on the list because nobody picks them. They
+derive from the bill-to site uses in the desk's business units on the next ERP sync.
+Agents, chase segments, email branding and the desk-scoped inbox are later milestones of
+the same Linear project, "Collection desks".
+
+## Two rules the database enforces
+
+Both were decided on 29 September 2026 and both are constraints, not conventions. Do not
+relax them in application code and do not add a second path around them.
+
+- **A desk and its inbound mailbox are one to one.** `collection_desks.inbound_shared_mailbox_connection_id`
+  is NOT NULL and UNIQUE. A second desk on the same mailbox gets a 409 that names the desk
+  already holding it, even when two admins race for it.
+- **A business unit is on at most one desk.** `collection_desk_business_units` is UNIQUE on
+  `business_unit_id` alone, not per desk. Ticking a unit that another desk holds gets a
+  409 that names that desk.
+
+A desk also needs at least one business unit, on create and on every later edit.
+
+## Roles and visibility
+
+A desk has two roles. A **manager** can rename the desk, change its business units,
+members, roles and outbound channels. A **member** can see the desk. Creating a desk,
+deleting it, and moving it to another mailbox stay with the group admin.
+
+Who sees a desk is the desk's live members plus every group admin of its group. Every
+desk check also asks whether the person still belongs to the group, through the same
+predicate sign-in uses: a scope grant or a live team membership. A member row on its own
+never grants anything, so a collector whose grant is revoked loses the desk the same
+instant. Milestone D, the desk-scoped inbox, must reuse that check
+through `CollectionDeskService.can_view`, never by reading the member table directly.
+
+<Note>
+A desk never admits anyone to Spinal. Members are added by email, and the row links to a
+user only when that person is already admitted to the group's Auth0 Organization through
+the roster, a team, or a grant. If the person is not yet admitted, the row waits as
+pending and links at their next sign-in. Invitations that admit outsiders stay on Teams.
+</Note>
+
+## Outbound channels
+
+A desk sends only from mailboxes the group has marked as senders. That list is the
+send-capability verdict in `sendable_mailboxes_for_groups`: the mailbox is connected, an
+admin declared it an outreach sender, and Microsoft has not refused a send from it. A
+read-only mailbox is never offered, so the inbound mailbox appears as a channel only when
+it qualifies on its own. If a channel is demoted after a desk picked it, the desk keeps
+the row, the desk page shows it as not sendable, and every send re-checks the verdict at
+fire time.
+
+## How a group gets its first desk
+
+A desk cannot be created before a mailbox exists, and a mailbox cannot be read before an
+app can read it. The order is fixed.
+
+<Steps>
+  <Step title="Register the Entra app">
+    In **Settings**, open **App Registrations** and add the group's Entra app: tenant id,
+    client id and client secret. The customer's IT grants the app `Mail.Read` for reading
+    and, later, `Mail.Send` scoped to the mailboxes Spinal may send as. Refresh the app's
+    permissions in Spinal after each grant so the recorded scopes match Entra.
+  </Step>
+  <Step title="Add the shared mailboxes">
+    Under the app, add each shared mailbox by address. Spinal starts a read-only pull and
+    shows the mailbox as connected with `Mail.Read`. Review the domain census before the
+    first triage so the group's own domains are classified as outbound.
+  </Step>
+  <Step title="Mark the senders">
+    For a mailbox the desk should send from, set its send role to outreach sender. Spinal
+    refuses this until the app has `Mail.Send`. The first real send proves the Exchange
+    side; if Microsoft refuses it the mailbox is marked blocked and leaves the registry.
+  </Step>
+  <Step title="Create the desk">
+    Open **Settings**, then **New desk**. Give it a name, pick the inbound mailbox, tick
+    its business units, and add the team. Create unlocks once those blocks are set.
+    Outbound channels can be picked now or later from the desk's **Outbound** page.
+  </Step>
+</Steps>
+
+Until the group has a desk, the app sidebar shows a **Set up a desk** entry in place of
+the desk switcher.
+
+## Why a desk is not a team
+
+Teams already exist and look similar: group-owned, with members and business-unit
+anchors. They are a different thing. A team is a scope grant: its anchors flow into the
+member's visible business units and its invitations admit outsiders. A desk grants no
+business-unit scope and admits nobody. Reusing the team tables would have leaked desk
+units into every member's scope, so the desk tables are siblings that copy the team
+tables' tenancy pattern instead: each child row carries `(desk_id, group_id)` pinned to
+the desk, and each referenced unit or mailbox is pinned to the same group.
+
+## Where the code is
+
+| What | Where |
+|------|-------|
+| Models | `dashboard-backend/src/database/models/collection_desk_model.py` |
+| Writes and the visibility predicates | `dashboard-backend/src/services/collection_desks/service.py` |
+| API, mounted at `/collection-desks` | `dashboard-backend/src/api/routers/collection_desks/` |
+| Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
+| Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md` |
+| Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |

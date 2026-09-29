@@ -45,6 +45,18 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Product",
+        "icon": "cubes",
+        "groups": [
+          {
+            "group": "Collections",
+            "pages": [
+              "product/collection-desks"
+            ]
+          }
+        ]
       }
     ]
   },
