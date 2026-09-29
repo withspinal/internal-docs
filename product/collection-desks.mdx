@@ -78,9 +78,18 @@ A desk sends only from mailboxes the group has marked as senders. That list is t
 send-capability verdict in `sendable_mailboxes_for_groups`: the mailbox is connected, an
 admin declared it an outreach sender, and Microsoft has not refused a send from it. A
 read-only mailbox is never offered, so the inbound mailbox appears as a channel only when
-it qualifies on its own. If a channel is demoted after a desk picked it, the desk keeps
-the row, the desk page shows it as not sendable, and every send re-checks the verdict at
-fire time.
+it qualifies on its own.
+
+Sendable has two halves, and the second one is easy to miss. The Entra app must hold
+`Mail.Send`, and each mailbox must be declared an outreach sender, because Microsoft
+cannot be asked per mailbox. In the desk's outbound dropdown a connected mailbox whose
+app holds `Mail.Send` is offered even before the declaration; choosing it makes the
+declaration. A mailbox whose app lacks `Mail.Send` is listed as read-only and cannot be
+chosen. If a channel is demoted after a desk picked it, the desk keeps the row, the desk
+page shows it as not sendable, and every send re-checks the verdict at fire time.
+
+The **Outbound channels** page under Organisation lists only the send-enabled addresses
+and which desk each is on.
 
 ## How a group gets its first desk
 
@@ -105,14 +114,19 @@ app can read it. The order is fixed.
     side; if Microsoft refuses it the mailbox is marked blocked and leaves the registry.
   </Step>
   <Step title="Create the desk">
-    Open **Settings**, then **New desk**. Give it a name, pick the inbound mailbox, tick
-    its business units, and add the team. Create unlocks once those blocks are set.
-    Outbound channels can be picked now or later from the desk's **Outbound** page.
+    Open **Settings**, then **New desk**. It is one page with five sections: name,
+    inbound mailbox, outbound address, business units, and members. Ticking a cluster
+    takes every unit under it; the desk stores the units. The footer counts the sections
+    still missing, and **Create desk** unlocks when all five are set. Each section is
+    also a page of its own under the desk afterwards.
   </Step>
 </Steps>
 
-Until the group has a desk, the app sidebar shows a **Set up a desk** entry in place of
-the desk switcher.
+When the group has no connected mailbox yet, the New desk page shows the two
+prerequisite steps with links instead of an empty form.
+
+The API accepts a desk without members or an outbound address; the form requires them
+so a desk is never created half-configured by hand.
 
 ## Why a desk is not a team
 
