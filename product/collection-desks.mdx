@@ -123,7 +123,8 @@ permission; `Mail.ReadWrite` does not send.
 permissions Microsoft reports, or disconnect the app. Disconnecting is typed-to-confirm and
 says what it breaks: which mailboxes stop syncing, which desks are built on them, and which
 campaigns send from them. Reconnecting the same app (same client id) brings its mailboxes
-back, with their sender settings reset. Removing one mailbox stops its sync after the current
+back, with their sender settings reset, and walks on to the mailbox step so a different
+address can be added; that is the path for changing the desk's email. Removing one mailbox stops its sync after the current
 run and keeps its history; it can be added again and re-reads its history window.
 
 Two honest limits, until a scheduled sync exists: a mailbox pulls when it is added, when
