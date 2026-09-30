@@ -93,24 +93,43 @@ the roster, a team, or a grant. If the person is not yet admitted, the row waits
 pending and links at their next sign-in. Invitations that admit outsiders stay on Teams.
 </Note>
 
-## Outbound channels
+## Mailboxes & numbers
 
-A desk sends only from mailboxes the group has marked as senders. That list is the
-send-capability verdict in `sendable_mailboxes_for_groups`: the mailbox is connected, an
-admin declared it an outreach sender, and Microsoft has not refused a send from it. A
-read-only mailbox is never offered, so the inbound mailbox appears as a channel only when
-it qualifies on its own.
+Everything a group connects lives on one settings page, **Mailboxes & numbers**, under
+Organisation (it replaced App Registrations and Outbound channels on 30 September 2026).
+It lists the group's shared mailboxes under the Entra app that reads them, says what each
+one is used for ("Reads · inbound for Ports credit control", "Reads and sends · sender for
+KEZAD credit control"), how far its sync got, and whether it can send. Phone numbers have a
+place on the page and a "Coming soon" badge; nothing is built for them.
 
-Sendable has two halves, and the second one is easy to miss. The Entra app must hold
-`Mail.Send`, and each mailbox must be declared an outreach sender, because Microsoft
-cannot be asked per mailbox. In the desk's outbound dropdown a connected mailbox whose
-app holds `Mail.Send` is offered even before the declaration; choosing it makes the
-declaration. A mailbox whose app lacks `Mail.Send` is listed as read-only and cannot be
-chosen. If a channel is demoted after a desk picked it, the desk keeps the row, the desk
-page shows it as not sendable, and every send re-checks the verdict at fire time.
+**Add connection** is one dialog with steps: choose the provider (only Microsoft Entra is
+live), paste the app's tenant id, client id and client secret (checked with Microsoft before
+anything is saved), then add the shared mailbox with how much history to import. The
+"Mailbox added" summary says, on the server's terms, what the mailbox can do: it reads; it
+can send once a desk uses it as its sending address, or it cannot send yet and there is a
+"Copy request for IT" for the `Mail.Send` grant; and how the import is going. "Create a desk
+with it" opens New desk with that mailbox preselected.
 
-The **Outbound channels** page under Organisation lists only the send-enabled addresses
-and which desk each is on.
+**Sending** has two halves, and the second one is easy to miss. The Entra app must hold
+`Mail.Send`, and each mailbox must be declared an outreach sender, because Microsoft cannot
+be asked per mailbox. Creating a desk declares the mailbox it picks as sender (a group-admin
+action, in the same transaction); the desk's Outbound page and the mailbox inspector can
+declare one too. A mailbox whose app lacks `Mail.Send` reads "Read only". The first real send
+proves the Exchange side; if Microsoft refuses it the mailbox reads "Blocked" and leaves the
+sendable registry until an admin re-declares it. Only `Mail.Send` counts as a send
+permission; `Mail.ReadWrite` does not send.
+
+**Manage** on the app row shows its ids, lets an admin update the secret, re-check the
+permissions Microsoft reports, or disconnect the app. Disconnecting is typed-to-confirm and
+says what it breaks: which mailboxes stop syncing, which desks are built on them, and which
+campaigns send from them. Reconnecting the same app (same client id) brings its mailboxes
+back, with their sender settings reset. Removing one mailbox stops its sync after the current
+run and keeps its history; it can be added again and re-reads its history window.
+
+Two honest limits, until a scheduled sync exists: a mailbox pulls when it is added, when
+**Sync now** is pressed and when the domain census is confirmed, so the sync column reads
+"Last full sync <when>" rather than a live cadence; and a mailbox added while Microsoft is
+still granting access says so and waits for **Sync now**.
 
 ## Email branding
 
@@ -131,40 +150,33 @@ scope, and if it is already on a desk the page says so and Create stays locked.
 
 ## How a group gets its first desk
 
-A desk cannot be created before a mailbox exists, and a mailbox cannot be read before an
-app can read it. The order is fixed.
+A desk cannot be created before the group can read and send, so **New desk** opens on a
+readiness card until it can (Figma 5270:1693):
 
 <Steps>
-  <Step title="Register the Entra app">
-    In **Settings**, open **App Registrations** and add the group's Entra app: tenant id,
-    client id and client secret. The customer's IT grants the app `Mail.Read` for reading
-    and, later, `Mail.Send` scoped to the mailboxes Spinal may send as. Refresh the app's
-    permissions in Spinal after each grant so the recorded scopes match Entra.
+  <Step title="Inbound mailbox">
+    **Add connection** runs the Mailboxes & numbers dialog: the Entra app (once) and the
+    shared mailbox customers write to. The row then shows the address and "Connected", or
+    "Waiting for access" while Microsoft is still granting the app its mailbox permissions.
+    If every connected mailbox is already a desk, the row says which desk holds each and
+    asks for another. If Microsoft rejected the app's secret, the row offers "Update secret".
   </Step>
-  <Step title="Add the shared mailboxes">
-    Under the app, add each shared mailbox by address. Spinal starts a read-only pull and
-    shows the mailbox as connected with `Mail.Read`. Review the domain census before the
-    first triage so the group's own domains are classified as outbound.
+  <Step title="Sending address">
+    Derived, never picked here: ready when a connected mailbox can send or can be declared a
+    sender (its app holds `Mail.Send`). Otherwise it reads "Read only" with **Recheck**, which
+    asks Microsoft again for every app behind the group's mailboxes, and the help band offers
+    "Copy request for IT" with the exact grant to ask for.
   </Step>
-  <Step title="Mark the senders">
-    For a mailbox the desk should send from, set its send role to outreach sender. Spinal
-    refuses this until the app has `Mail.Send`. The first real send proves the Exchange
-    side; if Microsoft refuses it the mailbox is marked blocked and leaves the registry.
-  </Step>
-  <Step title="Create the desk">
-    Open **Settings**, then **New desk**. It is one page with five sections: name,
-    inbound mailbox, outbound address, business units, and members. Ticking a cluster
-    takes every unit under it; the desk stores the units. The footer counts the sections
-    still missing, and **Create desk** unlocks when all five are set. Each section is
-    also a page of its own under the desk afterwards.
+  <Step title="Desk details">
+    **Set up desk** unlocks when both rows are ready and opens the form: name, inbound
+    mailbox, sending address, business units and members, all compulsory. When there is one
+    free mailbox it is preselected, and it is preselected as the sender when it can send. A
+    group with one business unit skips the unit picker.
   </Step>
 </Steps>
 
-When the group has no connected mailbox yet, the New desk page shows the two
-prerequisite steps with links instead of an empty form.
-
-The API accepts a desk without members or an outbound address; the form requires them
-so a desk is never created half-configured by hand.
+When the mailbox and a sender are both ready on arrival, New desk skips the card and shows
+the form.
 
 ## Why a desk is not a team
 
