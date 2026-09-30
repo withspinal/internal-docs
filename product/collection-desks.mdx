@@ -31,12 +31,17 @@ scope.
 | Inbound mailbox | The shared mailbox the desk reads. Its identity and thread of record. | A connected shared mailbox, read through the group's Entra app. |
 | Business units | The desk's book: the units it chases as one. | Ticked from the group's business units. A unit is on one desk at most. |
 | Members | The people who can see the desk's inbox, each as a manager or a member. | Added by email. A row links to a user when that person is already admitted to the group. |
-| Outbound channels | The addresses the desk may send from. | Picked from the group's send-enabled mailboxes only. |
+| Outbound channel | The address the desk sends from. | Picked from the group's send-enabled mailboxes only. One per desk for now: it is what agents send through. |
+| Email branding | The header and footer letterhead on the desk's emails. | Set per business unit on the desk's Email branding page. |
 
 Accounts, collectors and contacts are not on the list because nobody picks them. They
 derive from the bill-to site uses in the desk's business units on the next ERP sync.
-Agents, chase segments, email branding and the desk-scoped inbox are later milestones of
-the same Linear project, "Collection desks".
+Agents, chase segments and the desk-scoped inbox are later milestones of the same Linear
+project, "Collection desks". Phone numbers are not a channel yet.
+
+A desk is created complete: name, inbound mailbox, outbound address, at least one
+business unit and at least one member, in one call. It stays complete afterwards: the
+last member cannot be removed and the outbound address cannot be cleared, only changed.
 
 ## Two rules the database enforces
 
@@ -52,11 +57,27 @@ relax them in application code and do not add a second path around them.
 
 A desk also needs at least one business unit, on create and on every later edit.
 
+### Moving a unit to another desk
+
+The second desk is usually built from units the first one holds, so a unit on another
+desk can be ticked and moves; the move is always explicit and confirmed. In the picker a
+unit on another desk you are on reads "On Ports" and, once ticked, "Moving from Ports".
+Saving names the units confirmed to move; the server refuses any other held unit with a
+409 that lists every conflict, and the page turns that list into the confirmation dialog.
+A stale page therefore never takes a unit someone else claimed a moment ago.
+
+Who may move: a group admin, any unit; a desk member, only units on desks they are also
+on. A move that would leave the source desk with no units is refused. Until milestone E
+wires it, chasing already planned for a moved unit continues under its current campaign;
+the dialog says so.
+
 ## Roles and visibility
 
-A desk has two roles. A **manager** can rename the desk, change its business units,
-members, roles and outbound channels. A **member** can see the desk. Creating a desk,
-deleting it, and moving it to another mailbox stay with the group admin.
+A desk has two roles, manager and member, but for now they do the same thing: anyone
+on the desk can see it and change its settings (name, business units, members, roles,
+outbound address, branding of the units their grants cover). The role is recorded for
+milestone C, where managers approve agent actions. Creating a desk, deleting it, and
+moving it to another mailbox stay with the group admin.
 
 Who sees a desk is the desk's live members plus every group admin of its group. Every
 desk check also asks whether the person still belongs to the group, through the same
@@ -90,6 +111,23 @@ page shows it as not sendable, and every send re-checks the verdict at fire time
 
 The **Outbound channels** page under Organisation lists only the send-enabled addresses
 and which desk each is on.
+
+## Email branding
+
+Letterheads are set through the desk since 30 September 2026: the desk's Email branding
+page shows the header and footer image of every business unit the desk chases for, with
+the same editor, library and bulk apply the old group-wide page had. Applying a letterhead
+from the desk's library dialog offers the desk's units, all ticked, so "the same letterhead
+on every unit of this desk" is one click. The old `/settings/branding` page redirects to
+the first desk you can see.
+
+Authority stays with the business-unit grant, not the desk. A member whose grants do not
+cover a unit sees it on the page as "no access" and cannot change its letterhead; the desk
+role never widens what a person may edit. There is no signature or language setting; the
+letterhead is header and footer only.
+
+A group with one business unit skips the unit picker on New desk: the unit is the desk's
+scope, and if it is already on a desk the page says so and Create stays locked.
 
 ## How a group gets its first desk
 
@@ -146,5 +184,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Writes and the visibility predicates | `dashboard-backend/src/services/collection_desks/service.py` |
 | API, mounted at `/collection-desks` | `dashboard-backend/src/api/routers/collection_desks/` |
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
-| Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md` |
+| Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
+| Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
