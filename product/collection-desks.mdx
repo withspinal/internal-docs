@@ -36,8 +36,8 @@ scope.
 
 Accounts, collectors and contacts are not on the list because nobody picks them. They
 derive from the bill-to site uses in the desk's business units on the next ERP sync.
-Agents, chase segments and the desk-scoped inbox are later milestones of the same Linear
-project, "Collection desks". Phone numbers are not a channel yet.
+Agents are a later milestone of the same Linear project, "Collection desks"; segments and
+the desk-scoped inbox are below. Phone numbers are not a channel yet.
 
 A desk is created complete: name, inbound mailbox, outbound address, at least one
 business unit and at least one member, in one call. It stays complete afterwards: the
@@ -208,6 +208,67 @@ attachments still run on the caller's own grants, so a member whose grants do no
 the thread's unit can read and reply on the desk inbox but sees those panels empty.
 </Note>
 
+## Chasing: segments
+
+Since 1 October 2026 (Linear milestone E, spec `dashboard-backend/specs/october-2026/chasing-segments/spec.md`)
+a desk chases through **segments**, and the campaign object is gone from the product. Read this
+before touching the planner, the campaign tables or the Chasing page.
+
+**The book.** A desk chases every customer account with an open, collections-eligible invoice
+installment in one of its units. That set is the book; the Chasing page's coverage line is
+"chased accounts over the book". Nobody picks accounts.
+
+**Segments.** An ordered list per desk. Each segment is a rule over accounts (customer class,
+open balance over an amount in a named currency, days overdue, payment plan in arrears, credit
+hold; several predicates AND together, another segment is the OR) and a chase mode: a dunning
+ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account).
+Accounts match top to bottom and the first match wins; "Everyone else" is the catch-all and is
+always last. Every desk is born with its catch-all, draft and manual, so a new desk chases
+nobody until someone activates a ladder. A draft segment is not matched; it only shows how
+many accounts it would take.
+
+**Matching is materialised.** The hourly planner sweep walks the book through the live
+segments and writes one row per account into `collection_desk_segment_accounts`, which is
+UNIQUE on (desk, account): one segment per account per desk, enforced by the database. A
+changed match is a move: the old segment's planned reminders (the consolidated email included)
+end with reason `moved`, never a user cancel, and the new segment plans in the same sweep.
+Reordering is the only way two segments can want one account, and the sweep settles it. An
+account a person excludes ("Stop chasing on this desk" on the account card) is never matched
+again until the exclusion is lifted.
+
+**Not chased** has one meaning: accounts no active segment reaches, accounts an active ladder
+holds but nobody can be emailed for in any desk unit, accounts under a paused segment, excluded
+accounts, and manual-segment accounts with no collector. A disputed invoice is not "not chased":
+it is held at send time and shown on the segment page.
+
+**One chase per desk and account, across units and legal entities.** A ladder segment is run by
+one hidden campaign row (its "engine", marked by `campaigns.collection_desk_segment_id`). The
+planner plans it once per account over every unit on the desk; same-day reminders consolidate
+into one email per account covering all units, itemised per unit in the attached sheet, with the
+desk's one letterhead and the desk's chase channel as the sender. The row's unit is the engine's
+fixed carrier (it sets the client and timezone, never the letterhead). A dispute removes its own
+invoice from the email; a do-not-contact window in any desk unit holds the whole email. The
+engine row is not a campaign to any API: the campaign endpoints cannot see it, and membership,
+update and ladder edits refuse it. A campaign that still exists never plans on a unit that is on
+a desk.
+
+**Schedule and sender.** The desk carries sending days and a local send time; saving them is
+written into every engine and every ladder step, so the ladder's own times never apply. The
+chase channel is one of the desk's outbound channels; no channel means the reminder is held
+visibly, never sent from a Postmark identity. A desk cannot send from another desk's inbound
+mailbox.
+
+**Letterhead.** One header and footer per desk, on every chase and every reply sent as the desk
+(the per-unit letterheads keep serving sends outside a desk). Upload, pick from the group's
+library, or remove it on the desk's Email letterhead page.
+
+**Who may do what.** Any live member of the desk, or a group admin, creates, orders, activates
+and pauses segments and sets the schedule, channel and letterhead. Reads are desk-bound.
+
+**Not in this cut.** The agent mode's execution, approvals and SOPs (milestone C); "Collected,
+30d" and "Replied, 30d"; holidays and preview-before-send; shared ladders across desks; tags on
+accounts; statements instead of the per-unit sheet; deleting the campaign tables.
+
 ## Why a desk is not a team
 
 Teams already exist and look similar: group-owned, with members and business-unit
@@ -227,5 +288,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | API, mounted at `/collection-desks` | `dashboard-backend/src/api/routers/collection_desks/` |
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
+| Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
