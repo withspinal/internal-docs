@@ -127,10 +127,19 @@ back, with their sender settings reset, and walks on to the mailbox step so a di
 address can be added; that is the path for changing the desk's email. Removing one mailbox stops its sync after the current
 run and keeps its history; it can be added again and re-reads its history window.
 
-Two honest limits, until a scheduled sync exists: a mailbox pulls when it is added, when
+**A desk owns its mailbox** (since 1 October 2026). A shared mailbox is only read once it is
+some desk's inbound mailbox: adding it to Spinal probes it and stores it, nothing more; the
+first pull starts the moment a desk is created on it (or a desk's inbound mailbox is changed
+to it). A mailbox on no desk reads "Not on a desk yet" in the sync column, **Sync now** is
+disabled for it, and a kick that reaches it anyway (the domain-census confirm kicks every
+active mailbox) writes one "Sync skipped: not on a desk yet" line in its activity log and
+does nothing else. Every email the pull stores is stamped with the desk, and so is every
+issue the desk's outreach raises; that stamp is what the desk's inbox and tasks read.
+
+Two honest limits, until a scheduled sync exists: a mailbox pulls when it joins a desk, when
 **Sync now** is pressed and when the domain census is confirmed, so the sync column reads
 "Last full sync <when>" rather than a live cadence; and a mailbox added while Microsoft is
-still granting access says so and waits for **Sync now**.
+still granting access says so until a desk kicks its first pull.
 
 ## Email branding
 
@@ -181,31 +190,39 @@ the form.
 
 ## The desk's inbox and tasks
 
-Three links sit under the desk in the app sidebar (since 1 October 2026, Linear milestone D).
+Three links sit under the desk in the app sidebar (Linear milestone D; first cut 1 October
+2026, replaced the same day by the desk stamp).
 
-**Inbox** is the desk's shared mailbox, read as the desk: the customer-grouped inbox,
-limited to threads that are linked to a receivable in the desk's business units and
-that came through the desk's mailboxes (its inbound mailbox, or its sending address, so
-a chase sent from the desk and answered there stays with the desk). Everyone linked on
-the desk and every group admin reads it, whatever their own business-unit grants. That
-is the one place a person's view is wider than their grants, by decision: the inbox is
-bound to the desk, and being on the desk is the scope. The backend resolves `desk_id`
-into a desk scope in `api/dependencies/desk.py`; nothing else widens. Mail with no
-receivable link (most of a mailbox's traffic) is not in the desk inbox yet; a flat
-thread view is a later cut.
+**Inbox** is the desk's shared mailbox, read as the desk: the customer-grouped inbox over
+the threads whose emails carry the desk's stamp (`emails.desk_id`, written at ingest from
+the mailbox's desk and on sends through a shared mailbox from the conversation being
+answered), limited to threads linked to a receivable in the desk's business units.
+Everyone linked on the desk and every group admin reads it, whatever their own
+business-unit grants: being on the desk is the scope, and the backend resolves `desk_id`
+into a desk scope in `api/dependencies/desk.py`, the one documented widening. There is no
+ledger or business-unit lens on the inbox any more; the desk is its only scope, and the
+old lens-scoped `/inbox` is gone. A legacy `/inbox?thread=` link redirects to the desk that
+holds the thread, or to a page that says no desk you are on holds it. Mail with no
+receivable link is not in the desk inbox yet; a flat thread view is a later cut.
 
-**My tasks** is the person's own work: issues assigned to them and decisions waiting
-on them. It is not desk-specific.
+**My tasks** is the person's own work across desks: issues assigned to them and decisions
+waiting on them. Opening a row opens the conversation in the desk that holds it
+(`issues.desk_id`, stamped at creation from the source email, else the thread, else the
+unit), which also switches the current desk in the sidebar.
 
-**Desk tasks** is the unassigned work on the desk: open issues on the desk's business
-units with nobody assigned, still only as far as the caller's own grants reach (issues
-never widen). Until replies are auto-assigned to the person named earlier in the thread
-(milestone D's assignment work), that is almost every open issue on the desk's units.
+**Desk tasks** is the unassigned work on the desk: open issues stamped to the desk with
+nobody assigned, for every linked member and group admin (membership is the scope here
+too). Issues without a thread (missing billing email, undeliverable, outreach approval)
+carry the unit's desk and open their resolution modal. Until replies are auto-assigned to
+the person named earlier in the thread (milestone D's assignment work), that is almost
+every open issue on the desk.
 
 <Note>
 Opening a thread's context panel, resolving or assigning its issues and uploading
 attachments still run on the caller's own grants, so a member whose grants do not cover
 the thread's unit can read and reply on the desk inbox but sees those panels empty.
+Personal mail connections (Gmail, delegated Outlook) and the Spinal sender stamp no desk;
+their threads are reachable only through the redirect's "no desk" page for now.
 </Note>
 
 ## Chasing: segments
@@ -289,5 +306,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
+| Desk stamp, sync gate, inbox and tasks on the stamp | `dashboard-backend/specs/october-2026/desk-owns-the-mailbox/spec.md` (supersedes `desk-inbox-and-tasks`); derivation in `services/collection_desks/stamp.py` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
