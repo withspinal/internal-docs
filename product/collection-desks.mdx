@@ -193,17 +193,25 @@ the form.
 Three links sit under the desk in the app sidebar (Linear milestone D; first cut 1 October
 2026, replaced the same day by the desk stamp).
 
-**Inbox** is the desk's shared mailbox, read as the desk: the customer-grouped inbox over
-the threads whose emails carry the desk's stamp (`emails.desk_id`, written at ingest from
-the mailbox's desk and on sends through a shared mailbox from the conversation being
-answered), limited to threads linked to a receivable in the desk's business units.
-Everyone linked on the desk and every group admin reads it, whatever their own
-business-unit grants: being on the desk is the scope, and the backend resolves `desk_id`
-into a desk scope in `api/dependencies/desk.py`, the one documented widening. There is no
-ledger or business-unit lens on the inbox any more; the desk is its only scope, and the
-old lens-scoped `/inbox` is gone. A legacy `/inbox?thread=` link redirects to the desk that
-holds the thread, or to a page that says no desk you are on holds it. Mail with no
-receivable link is not in the desk inbox yet; a flat thread view is a later cut.
+**Inbox** is the desk's shared mailbox, read as the desk. It is one list of customers,
+newest email first, with a count on each customer of its threads that carry an open task
+(an open issue such as a dispute, a missing PO or a promise to pay). Open a customer and
+its threads expand under it, newest first. There are no tabs and no context rail; search
+by customer name is the only filter. The list holds threads linked to a receivable in the
+desk's business units that came through the desk's mailbox. Everyone linked on the desk
+and every group admin reads it, whatever their own business-unit grants. That is the one
+place a person's view is wider than their grants, by decision: the inbox is bound to the
+desk, and being on the desk is the scope. The backend resolves `desk_id` into a desk
+scope in `api/dependencies/desk.py`; nothing else widens. Mail with no receivable link
+(most of a mailbox's traffic) is not in the desk inbox yet; a flat thread view is a
+later cut.
+
+A reply from the desk inbox sends from the desk's one sending address, the chase channel
+chosen in desk settings. There is no sender to pick: not a personal mailbox, not the
+group's Postmark default. A desk with no chase channel cannot reply, and the composer
+says so and links to desk settings. Every email the desk sends, reply or chase, carries
+`Reply-To` of the desk's inbound mailbox, because only a desk's inbound mailbox is ever
+synced; without it a customer's answer to the chase address would never arrive.
 
 **My tasks** is the person's own work across desks: issues assigned to them and decisions
 waiting on them. Opening a row opens the conversation in the desk that holds it
@@ -218,11 +226,9 @@ the person named earlier in the thread (milestone D's assignment work), that is 
 every open issue on the desk.
 
 <Note>
-Opening a thread's context panel, resolving or assigning its issues and uploading
-attachments still run on the caller's own grants, so a member whose grants do not cover
-the thread's unit can read and reply on the desk inbox but sees those panels empty.
-Personal mail connections (Gmail, delegated Outlook) and the Spinal sender stamp no desk;
-their threads are reachable only through the redirect's "no desk" page for now.
+Resolving or assigning a thread's issues and uploading attachments still run on the
+caller's own grants, so a member whose grants do not cover the thread's unit can read and
+reply on the desk inbox but cannot act on its issues.
 </Note>
 
 ## Chasing: segments
