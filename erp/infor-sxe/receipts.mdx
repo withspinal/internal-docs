@@ -1,0 +1,113 @@
+---
+title: "Receipts in SX.e"
+sidebarTitle: "Receipts"
+description: "What SX.e writes when a payment arrives, and how to assemble a Spine receipt from it"
+icon: "money-check-dollar"
+---
+
+A Spine receipt is one incoming payment, with its unapplied remainder as a number on the
+row. SX.e has no table for that. This page says what SX.e writes when money arrives and
+how we assemble a `receipts` row from it.
+
+## A receipt is a check record
+
+In Spine terms, SX.e's check record is our `receipts` row. It is a row in `aret`, the same
+table that holds invoices, with type code 7. It carries the cheque number, the amount,
+the date, the customer, and the division. Everything else about the payment lives on
+other rows: the invoices it paid are on their own rows, and the unapplied remainder is a
+row of its own.
+
+| Spine column | SX.e | Note |
+|---|---|---|
+| `customer_account_id` | `aret.custno` | |
+| `business_unit_id` | `aret.divno` | Every payment has a division |
+| `amount` | `aret.amount` | Store it positive. The stored sign is not confirmed |
+| `currency` | `arsc.currencyty` on the customer | Blank means the company's currency |
+| `receipt_date` | `aret.invdt` | SX.e reuses the invoice date column |
+| `gl_date` | `aret.postdt` | |
+| `bank_reference` | `aret.checkno`, or `aret.paymentrefer` when the cheque number is zero | Zero means cash, or a wire whose reference the clerk typed in |
+| `maturity_date` | Nothing | SX.e has no post-dated cheque |
+| `external_system_identifier` | `cono`, `custno`, `jrnlno`, `setno`, `checkno` | Or `aretp.rowpointer` when the payment record exists |
+
+Every posting sits in a journal, `aret.jrnlno`, and a set inside it, `aret.setno`. The
+journal is how SX.e groups the rows of one cash receipts session.
+
+## The unapplied amount is a row, not a number
+
+In the Spine, the part of a payment not yet matched to an invoice is `unapplied_amount`
+on the receipt. SX.e writes it as a separate row in `aret`, type 3, with the invoice
+number `0-00` and a sequence number.
+
+Two consequences:
+- Our `unapplied_amount` is the sum of the active unapplied cash rows that belong to the
+  receipt.
+- When part of it is later applied, SX.e closes the row and writes a new one for what is
+  left, with the next sequence number. The remainder gets a new identity each time.
+
+`on_account_amount` stays at 0. SX.e has no state for cash parked on purpose. A payment
+nobody has matched and a payment left on account look the same.
+
+## The optional payment record
+
+In Spine terms, `aretp` is a second receipt header with a real foreign key from each
+application. SX.e writes it only when **Allow AR Payment Reversals** is on, and only for
+payments entered after it was switched on. Each paid invoice row then carries
+`aret.payrowpointer` pointing at it.
+
+Without it, the check record is the only header, and we find its applications by
+matching values. The
+[receipt applications page](/erp/infor-sxe/receipt-applications#finding-the-receipt)
+covers both cases.
+
+## Rows that look like receipts and are not
+
+Four kinds of SX.e row would become a receipt if loaded naively.
+
+| SX.e row | In Spine terms | What to do |
+|---|---|---|
+| A Miscellaneous Cash posting | Not a receipt. It touches no customer balance | Leave it out |
+| A deposit tendered on an order not yet invoiced | A liability, not a receipt yet | Leave it out until the order is invoiced. It then becomes an application with `funding_source = deposit` |
+| A payment on a lockbox dummy customer | A receipt with no account | Load it with `customer_account_id` NULL |
+| An invoice on a customer record that stands for a card processor | A debtor we must not chase | Exclude those accounts from outreach. It happens when a payment type has **Post to A/R at Invoicing** on |
+
+## payment_method
+
+SX.e stores no fixed payment method. The customer defines up to 99 payment type codes,
+each with flags such as "is a credit card", and the field only appears when **Allow
+Payment Types** is on. Ask for their payment type table. Without it:
+
+| Cheque number | Payment reference | `payment_method` |
+|---|---|---|
+| Above zero | | `cheque` |
+| Zero | Filled | `bank_transfer` |
+| Zero | Blank | `cash`, if the customer confirms it |
+
+## reversed_at
+
+In the Spine a reversed receipt keeps its row with `reversed_at` set. SX.e does the
+same: Customer Payment Reversal Entry (ARECR) sets `aret.reversedfl` on the check record
+and makes the invoices it paid active again. It writes no offsetting row, so the
+[reversal rows on the applications](/erp/infor-sxe/receipt-applications#reversals) are
+ours to write.
+
+`reversal_reason` is `nsf` for NSF Check, and `error` for the two wrong-application
+reasons. SX.e has no stop-payment reason.
+
+ARECR cannot reverse a payment taken in sales order entry or an **Apply Credits**
+posting. A clerk corrects those by hand, and the correction looks like ordinary new rows.
+
+## Check on the data
+
+The first two decide how receipts are assembled, and both are visible in the tables.
+
+| Question | Where to look |
+|---|---|
+| Is **Allow AR Payment Reversals** on, and since when? | Whether `aretp` has rows, and the earliest `aretp.postdttz` |
+| One check record per cheque, or one per invoice paid? | A journal and set with several paid rows: count the type code 7 rows in it |
+| How are ACH and wire receipts recorded? | Check records with `checkno` of zero and a filled `paymentrefer` |
+
+## Ask the customer
+
+The data cannot answer these.
+
+1. Which customer numbers stand for card processors or a lockbox dummy.

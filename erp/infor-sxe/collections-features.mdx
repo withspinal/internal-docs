@@ -1,0 +1,102 @@
+---
+title: "Disputes and collections features in SX.e"
+sidebarTitle: "Disputes and collections"
+description: "How SX.e's dispute flag, late charges, and statements map to the Spine, and what Spinal has to respect"
+icon: "comments-dollar"
+---
+
+The Spine records a dispute with an amount, a reason, and dates, and keeps collection
+settings per account. SX.e has a flag, a monthly late charge run, and statements. This
+page says what each becomes, and what Spinal must not contradict.
+
+## A dispute is a flag on an installment
+
+In Spine terms, an SX.e dispute is a `disputes` row with only `installment_id` filled in.
+The flag is `aret.disputefl` on one scheduled payment, and it has no amount, reason, or
+date. Infor says a disputed item is "not aged or service-charged". To dispute part of an
+invoice, a clerk splits the installment and flags one piece, so a disputed installment
+is always disputed in full.
+
+The adapter supplies the rest.
+
+| `disputes` column | Rule |
+|---|---|
+| `original_amount` | The installment's open amount when the flag was first seen |
+| `current_amount` | Its open amount now |
+| `dispute_date` | The date the flag was first seen |
+| `reason` | `other` |
+| `status` | `open` while flagged. `resolved_credited` if a credit closed the installment. `resolved_rejected` if a payment did. `withdrawn` if the flag was cleared |
+
+A split replaces the installment, so the dispute has to move to the new piece that
+carries the flag.
+
+## A service charge is an interest_note
+
+SX.e's late fee is a service charge. The monthly roll calculates it on past-due buckets
+and writes one `aret` row with type code 1 per customer. In Spine terms it is an
+`ar_transactions` row of type `interest_note` with its own installment. It does not
+compound, and it names no invoice.
+
+Its `transaction_number` is the posting date, so it repeats across customers. A fee a
+clerk types in by hand has the same type code, and nothing in the row separates
+`interest_note` from `fee`.
+
+## Statements overlap with our outreach
+
+A customer's statement type is open item or none, in `arsc.statementty`. SX.e sends no
+dunning letters, except in recent CloudSuite Distribution releases with an extra licence.
+
+If the customer sends statements from SX.e, their customers will receive both the
+statement and Spinal's outreach. Ask how statements are sent before Spinal sends
+anything.
+
+## exclude_from_collections
+
+`invoice_installments.exclude_from_collections` has no direct source in SX.e, so set it by
+rule.
+
+| Signal | Set it |
+|---|---|
+| The dispute flag | No. Create a dispute |
+| A COD invoice | Yes, until the customer says they chase COD |
+| A refund clearing invoice | Yes. See [credit notes](/erp/infor-sxe/credit-notes#a-refund-is-an-invoice-paid-by-a-credit) |
+| An invoice billed to a finance company | No. Chase the finance company's account |
+
+## Where collectors write things down
+
+The Spine has no table for collection activity recorded in the ERP, and SX.e has no
+collections log. A collector records a call in a note or an activity, and which one is
+the customer's habit.
+
+| `notes.notestype` | Attached to |
+|---|---|
+| `C` | A customer |
+| `CS` | A ship-to |
+| `AR` | An AR transaction |
+
+These codes are not in Infor's documentation. They come from a public field dictionary.
+
+## Tools the customer may already have
+
+Billtrust delivers invoices and statements for many SX.e customers, and SX.e has a
+settings page for it. Dun and Bradstreet writes a risk code onto the customer, in
+`arsc.dnbiriskcode`, which fills `customer_collection_profiles.risk_code`. CloudSuite
+Distribution has a credit manager workspace.
+
+## Check on the data
+
+These come from the tables once we have access.
+
+| Question | Where to look |
+|---|---|
+| Do they use the dispute flag? | The count of rows with `aret.disputefl` set |
+| How are statements sent? | `arsc.estmttype`, and the Billtrust settings page |
+| Do collectors write notes? | Counts in `notes` by type `C` and `AR` |
+
+## Ask the customer
+
+The data cannot answer these.
+
+1. Who clears the dispute flag.
+2. Whether they chase COD invoices.
+3. Where collectors record promises, if the notes show nothing.

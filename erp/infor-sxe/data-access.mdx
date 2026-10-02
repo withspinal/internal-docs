@@ -1,0 +1,98 @@
+---
+title: "Getting data out of SX.e"
+sidebarTitle: "Data access"
+description: "What the customer has to switch on, how the nightly sync reads the Data Lake, and the fallback if they refuse"
+icon: "database"
+---
+
+We read CloudSuite Distribution through the Infor Data Lake. This page says what the
+customer has to switch on, how the nightly sync works, and what we do if they refuse.
+These pages assume CloudSuite Distribution. SX.e on a customer's own servers is not
+covered.
+
+## The Data Lake is a copy we query
+
+CloudSuite Distribution gives no database access. Infor keeps a copy of the SX.e tables
+in its Data Lake, and we query that copy with SQL through the Compass API. SX.e puts
+nothing in the copy unless it is told to, so the customer has to set it up.
+
+## What the customer has to do
+
+Three settings and one credential. Their Infor administrator or partner does all of it.
+
+1. In SA Administrator Options, select **Replicate to Data Lake**. This is the master
+   switch. Until it is on, nothing flows.
+2. In SA Audit Processing Administration, mark the tables below. Replication is chosen
+   table by table, and an unmarked table never arrives.
+3. Run SA Data Extraction for Data Lake and Birst (SAABE) once, to copy what already
+   exists. Replication only sends rows that change after the switch was turned on, so
+   without this step an invoice posted last month and untouched since would never reach
+   us. The load selects AR transactions by invoice date, so the range has to reach back
+   past the oldest unpaid invoice.
+4. In Infor OS, create an authorized app of type Backend Service with a service account
+   that has the role `DATAFABRIC-user`, and send us the `.ionapi` credentials file.
+
+Do step 1 before step 3, so that nothing changes in between.
+
+| Spine objects | Tables to mark |
+|---|---|
+| Clients and business units | `sasc`, `sastn`, `sastc`, `sasj` |
+| Accounts, sites, contacts | `arsc`, `arss`, `arsg`, `sasta`, `contacts`, `contacts-roles`, `contacts-methods`, `notes` |
+| Documents, installments, receipts | `aret`, `aretp`, `arett` |
+| Lines | `oeeh`, `oeel`, `addon` |
+
+Do not ask for `arsd` or `arsde`. They hold stored payment card data.
+
+## The nightly sync
+
+Each night, pull every row changed since the last successful run, with an overlap of a
+few days, and upsert it by key. The Data Lake stamps each row with
+`infor.lastModified()`, the time it arrived there, and Infor documents it as the field
+for incremental loads. Move the marker forward only after the run succeeds, so a failed
+night repairs itself the next night.
+
+Then prove the run with SX.e's own figures. The customer record carries each customer's
+total balance, updated as transactions post. Our open items per customer must add up to
+it. A mismatch names the customer to re-pull in full.
+
+Compass is asynchronous: post the SQL, poll for completion, page through the result. A
+page holds 100,000 rows.
+
+Deletes do not need handling. SX.e never deletes a row for a business reason. A paid
+invoice goes inactive and stays. The one job that matters is a customer renumber, which
+rewrites the customer number on every record, so ask the customer to tell us before
+they run one.
+
+## If they refuse the Data Lake
+
+SX.e also has a REST call, FetchWhere, that reads one table live with a filter. It needs
+only the credential. Optimizely's storefront connector reads CloudSuite Distribution
+this way in production.
+
+The same nightly process works with three changes:
+- One table per call and no joins, so we join on our side.
+- Filter on the change timestamp, `transdttmz`. The filter is free text in SX.e's own
+  query language. A date comparison should work, and it is the first thing to test.
+- Keep each call narrow. Infor locks out a call that reads more than 500,000 records for
+  30 minutes.
+
+The totals check is the same, and it is what makes either method safe.
+
+## Keys
+
+An AR transaction is identified by `cono`, `custno`, `jrnlno`, `invno`, `invsuf`, and
+`seqno`. Infor builds the document id of its own integration messages from these. The
+invoice number alone is not enough, because a number can be reused once the earlier
+record is inactive.
+
+Every Data Lake table also has `rowpointer`, which is simpler. Store both until we know
+that `rowpointer` survives a customer renumber.
+
+## Ask the customer
+
+None of this is visible until the setup is done, so it has to be asked.
+
+1. That they run CloudSuite Distribution.
+2. Whether **Replicate to Data Lake** is already on, and which tables are marked. It
+   may be, if they use Infor's analytics or a payment vendor.
+3. Who their Infor partner is, since they will do the setup.

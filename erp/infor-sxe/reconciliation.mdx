@@ -1,0 +1,103 @@
+---
+title: "Balances, aging, and reconciliation in SX.e"
+sidebarTitle: "Reconciliation"
+description: "SX.e stores the aging we compute, and this page says how to tie the Spine to it"
+icon: "scale-balanced"
+---
+
+The Spine proves a load by summing open installments and comparing the result with the
+ERP's own figures. SX.e stores those figures on the customer record. They are our aging
+buckets, kept as stored numbers instead of computed from installments.
+
+## SX.e stores what we compute
+
+The customer record carries a set of balance fields. In Spine terms they are the output
+of our aging query, for one account, as of the last time SX.e ran its monthly roll.
+
+| SX.e field | In Spine terms |
+|---|---|
+| `arsc.periodbal` | The five aging buckets |
+| `arsc.futinvbal` | Installments due after the end of the current bucket |
+| `arsc.servchgbal` | Open `interest_note` documents |
+| `arsc.misccrbal`, `arsc.uncashbal` | Open credit memos and unapplied cash, stored positive |
+| `arsc.codbal` | Open COD invoices. Outside the total by default |
+| `arsc.ordbal` | Open orders. Not a receivable |
+
+Infor documents the total as:
+
+```text
+total = periods 1 to 5 + future invoices + service charges
+        - miscellaneous credits - unapplied cash
+```
+
+The transactions are the truth. When these fields disagree with the rows in `aret`,
+SX.e's own reports correct the fields, never the rows.
+
+## The total is current, the buckets are not
+
+SX.e updates the total as transactions post, so it is right every night. The split
+across buckets changes only when the Customer Entry Roll Balances Report (ARER) runs,
+usually monthly. Between rolls a new document goes into period 1 whatever its due date.
+
+So tie totals to the customer record, and tie buckets to a report run on the day.
+`arsc.lastagedt` says when the buckets were last right.
+
+The buckets themselves map one to one onto ours, with one offset to remember: period 1
+is current, not 1 to 30 days past due. Periods 2 to 5 are past due. The lengths are in
+`sasc.arperdays`, and some customers reset them every month.
+
+## Two settings move credits into the buckets
+
+**Age Miscellaneous Credits** and **Age Service Charges**, both off by default, move
+those amounts inside the period buckets. When one is on, the amount is already in the
+periods, and the equation above counts it twice. Ask which are on before picking an
+equation.
+
+## The tie-out
+
+Ask the customer to run two reports as of the date of the load.
+
+| Level | Spine side | SX.e side |
+|---|---|---|
+| Customer total | Open documents minus open credits and unapplied cash | The total balance equation |
+| Buckets | Open installments aged by due date | Customer Period Analysis Report (ARRP), aged by due date |
+| General ledger | Open amounts by `gl_date`, in ledger currency, per AR control account | Customer Trial Balance Report (ARRT) |
+
+Start only when the customer's own data is clean. The Customer Balancing Audit Report
+(ARRB) lists customers whose stored fields do not match their transactions.
+
+On `ar_reconciliation_runs`, set `aging_basis` to `due_date`, since ARER has no other
+option, and `bucket_edges` from `sasc.arperdays`.
+
+## Differences that are not bugs
+
+Each of these produces a variance that looks like a fault in the adapter.
+
+| Cause | What to do |
+|---|---|
+| An aging setting put credits inside the periods | Pick the matching equation |
+| New documents sit in period 1 until the next roll | Tie buckets to ARRP, not to `arsc.periodbal` |
+| COD is outside the total | Tie it separately against `arsc.codbal` |
+| An invoice has a document row and installment rows | Sum one kind. See [the open balance](/erp/infor-sxe/invoices#open_amount-is-computed) |
+| Rebate rows never reach the general ledger | Leave out type code 2 |
+| A clerk changed a balance field by hand | The change is logged in `sasb`. Report it as explained |
+
+`arsc` has a second set of balance fields with the prefix `cust`, and each ship-to has a
+set with the prefix `job`. Which set covers the customer alone and which includes its
+ship-tos is not documented. Test it on the first load.
+
+## Check on the data
+
+These come from the tables once we have access.
+
+| Question | Where to look |
+|---|---|
+| Are the two aging settings on? | Whether the stored total equals the default equation. Off by the credits or the service charges means a setting is on. The setting itself is in `sasc.arrollcd`, whose values are not documented |
+| When did ARER last run? | `arsc.lastagedt` |
+
+## Ask the customer
+
+The data cannot answer these.
+
+1. Which report is their AR balance of record.
+2. On which days they run month end. A load taken in the middle will not tie.

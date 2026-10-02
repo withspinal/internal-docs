@@ -1,0 +1,109 @@
+---
+title: "Discovery questions for an SX.e customer"
+sidebarTitle: "Discovery questions"
+description: "What to ask an SX.e customer, and what to ask them for, before we design the adapter"
+icon: "circle-question"
+---
+
+Use this page to run discovery with a customer on Infor SX.e. Ask the first question
+before anything else. It decides what a Spine client is, and everything else keys on
+that.
+
+The SX.e administrator or the customer's Infor partner can answer most of these. Names
+in bold are settings in SA Administrator Options.
+
+## The most important question
+
+How does SX.e hold your legal entities? SX.e users do not say "legal entity". They say
+"company" and "division", so ask it in three parts, and ask the controller, not IT.
+
+1. How many company numbers do you run?
+2. What does a division mean in your business: a branch, a product line, or a separate
+   legal entity with its own tax id?
+3. Is the **Divisional** option on in SA Company Setup?
+
+| Answer | Spine clients | Customers |
+|---|---|---|
+| One company, one legal entity | One | Shared. The simplest case |
+| One company, legal entities as divisions | One per division | Shared |
+| Several companies | One per company | Duplicated per company, with nothing to link them |
+
+The second answer needs **Divisional** on, so that every AR row carries a division. A
+division with its own tax id in the setup screen does not prove it is a legal entity.
+Some distributors fill that in for branch reporting.
+
+## Access
+
+These decide whether we can read the data at all.
+
+1. Do you run CloudSuite Distribution? These pages assume it.
+2. Is **Replicate to Data Lake** on, and for which tables?
+3. Who is your Infor partner?
+4. Which AR, payment, or collections products already connect to SX.e?
+5. Have you ever run the Change Customer Number report? It rewrites the customer
+   number on every record.
+
+## Practice
+
+These are about how the customer works, which the data cannot tell us.
+
+1. Is each division a legal entity or a branch? The controller knows.
+2. How is the collections team organised: by division, branch, or credit manager?
+3. Do collectors chase by job or by customer?
+4. Which contact type means accounts payable, if the code descriptions do not say?
+5. How do you refund a credit balance, and what marks the clearing invoice?
+6. How do you correct a credit applied to the wrong invoice?
+7. Should COD invoices be chased?
+8. Which customer numbers stand for card processors or a lockbox dummy?
+9. Which report is your AR balance of record, and on which days do you run month end?
+10. How do you send statements, and through which product?
+11. Who clears the dispute flag?
+12. Where do collectors record calls and promises?
+
+## Documents to ask for
+
+Two reports give us the figures to tie to, and the dictionary names the fields Infor
+does not document.
+
+| Document | Why |
+|---|---|
+| Customer Trial Balance Report (ARRT), as of the date of our first load | The general ledger tie |
+| Customer Period Analysis Report (ARRP), as of the same date, aged by due date | The bucket tie |
+| The data dictionary from SX Dictionary Help, for `aret`, `aretp`, `arsc`, `arss`, and `email-links` | The meaning of fields we have only by name |
+
+## What we check ourselves
+
+Once we have access, these come from the tables. Each page ends with the same list for
+its topic.
+
+| Question | Where to look |
+|---|---|
+| Which company numbers are live? | Which `cono` values have recent rows in `aret` |
+| Are divisions on AR rows, and do they carry tax ids? | Whether `aret.divno` is ever blank, and `sastn.fedtaxid` |
+| Any foreign currency? | Rows in `sastc`, and non-blank `arsc.currencyty` |
+| Do they use ship-tos as jobs? | `arss` rows with `jobdesc` or lien fields filled |
+| Who receives statements? | `arsc.estmttype`, and `email-links` |
+| Do they use **Statements to Customer**, **Invoice To**, or groups? | Non-blank `arsc.custno2`, `arsc.fpcustno`, `arsc.groupid` |
+| Are credit rows stored negative? | The sign of `aret.amount` on type codes 5 and 6 |
+| Which type codes exist? | `aret.transcd`, grouped with a count |
+| Do any terms split an invoice? | Documents with more than one scheduled pay row |
+| How are short payments recorded? | Type code 8 rows against closed rows with `aret.pifamt` set |
+| Is **Resequence Unapplied Credits** on? | What is left after a partial credit application |
+| Is **Allow AR Payment Reversals** on, and since when? | Rows in `aretp`, and the earliest `aretp.postdttz` |
+| One check record per cheque, or per invoice paid? | Count type code 7 rows in a journal and set with several paid rows |
+| How are ACH and wire receipts recorded? | Check records with `checkno` zero and `paymentrefer` filled |
+| Which field says how a scheduled payment was closed? | `checknopaid`, `crjrnlno`, and `reversedfl` on closed rows |
+| Does `paymtamt` include the discount? | Rows with `discamt` above zero |
+| Are the aging settings on? | Whether the stored total matches the default equation |
+| When did the monthly roll last run? | `arsc.lastagedt` |
+| Do they use the dispute flag? | Rows with `aret.disputefl` set |
+
+Pull these rows first. Each settles a question that documentation could not.
+
+| Case | Tables |
+|---|---|
+| An invoice paid in part | `aret` |
+| A cheque that paid two invoices and left a remainder, before and after reversal | `aret`, `aretp` |
+| A credit memo from a return order | `aret`, `oeeh` |
+| A partly applied miscellaneous credit | `aret` |
+| A customer with ship-tos and contacts | `arsc`, `arss`, `contacts`, `contacts-roles` |

@@ -57,6 +57,28 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "ERP mappings",
+        "icon": "diagram-project",
+        "groups": [
+          {
+            "group": "Infor SX.e",
+            "pages": [
+              "erp/infor-sxe/overview",
+              "erp/infor-sxe/data-access",
+              "erp/infor-sxe/org-structure",
+              "erp/infor-sxe/customers",
+              "erp/infor-sxe/invoices",
+              "erp/infor-sxe/credit-notes",
+              "erp/infor-sxe/receipts",
+              "erp/infor-sxe/receipt-applications",
+              "erp/infor-sxe/reconciliation",
+              "erp/infor-sxe/collections-features",
+              "erp/infor-sxe/discovery-questions"
+            ]
+          }
+        ]
       }
     ]
   },

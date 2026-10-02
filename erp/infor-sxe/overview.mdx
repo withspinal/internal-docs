@@ -1,0 +1,128 @@
+---
+title: "Infor SX.e and the Spine"
+sidebarTitle: "Overview"
+description: "How well Infor SX.e fits the Spine, what to settle first, and how much to trust each fact"
+icon: "map"
+---
+
+These pages describe how data in the Infor SX.e ERP maps onto the Spine. Read this page
+first.
+
+This is research. No adapter exists, and nothing here has been tested against a live
+SX.e system.
+
+## What SX.e is
+
+SX.e is an ERP for wholesale distributors, also known by its older names Trend and
+NxTrend SX.enterprise. Infor now sells it only as CloudSuite Distribution (CSD), hosted
+by Infor, and these pages assume that. We read it through the Infor Data Lake, because
+CSD gives no database access. Older customers still run SX.e on their own servers, and
+these pages do not cover that.
+
+## How SX.e is organised
+
+A table is named after the screen that maintains it, and the first two letters are the
+module: AR for customers and receivables, OE for sales orders, SA for system setup, GL
+for the general ledger. Every table carries the company number, `cono`, a change
+timestamp, `transdttmz`, and nine customer-defined fields, `user1` to `user9`.
+
+These are the tables the mapping reads, grouped by the Spine objects they feed.
+
+### Clients, ledgers, and business units
+
+In Spine terms, a company is a client with its ledger, and a division is a business
+unit.
+
+| Table | What is in it |
+|---|---|
+| `sasc` | One row per company: name, tax ids, currency, fiscal calendar, and every administrator option, such as aging periods and write-off limits |
+| `sastn` | Number-coded lists, including the divisions with their names and tax ids |
+| `sastc` | Foreign currencies, with the exchange rate last entered for each. Empty for a single-currency company |
+| `sasj` | Journals: one per posting batch, with the posting date behind every `gl_date` |
+| `sasoo` | Operators, with the divisions each may see. The source for business unit grants |
+| `smsn`, `icsd`, `crsb` | Salesreps, warehouses, and banks. Labels only |
+
+### Accounts, sites, and contacts
+
+One customer record is the party, the account, and the bill-to site. A ship-to is a
+site with its own credit settings.
+
+| Table | What is in it |
+|---|---|
+| `arsc` | The customer: name, address, terms, credit limit, order status, credit manager, stored aging, and payment statistics |
+| `arss` | Ship-tos and jobs: an address with its own terms, credit limit, balances, and lien data |
+| `arsg` | Customer master groups, with a shared credit limit and hold settings |
+| `sasta` | Letter-coded lists: payment terms, customer types, ship vias, return reasons |
+| `contacts`, `contacts-roles`, `contacts-methods` | People, their links to customers and ship-tos, and their emails and phone numbers |
+| `email-links` | The addresses selected for each document type. The first rule for who to chase. Columns not documented |
+| `notes` | Free-text notes on customers, ship-tos, transactions, and orders |
+
+### Documents, installments, and lines
+
+One table holds every AR row, and the type code says what each row is in Spine terms.
+
+| Table | What is in it |
+|---|---|
+| `aret` | Every AR row. Types 0, 1, 4, 5, and 6 are documents, type 11 is an installment, type 7 is a receipt, and type 3 is a receipt's unapplied amount |
+| `oeeh` | The sales order behind an invoice: currency, tax, dates, division, warehouse, and customer PO number |
+| `oeel` | Order lines: product, quantity, price, net amount, and tax. Our `ar_transaction_lines` |
+| `addon` | Order charges such as freight |
+| `arett` | Sales tax per jurisdiction per order |
+| `oeelcr` | The tie from a correction or return line to the original line. Not in the Data Lake |
+
+### Receipts and applications
+
+A receipt is a row in `aret`, and an application is the installment row it paid.
+
+| Table | What is in it |
+|---|---|
+| `aret`, type 7 | Check records: one per payment. Our `receipts` |
+| `aret`, type 11, closed | Paid installments, stamped with the amount, date, and cheque. Our `receipt_applications` |
+| `aretp` | One record per payment, with a foreign key from each paid installment. Present only when payment reversals are switched on |
+
+### Reconciliation
+
+The customer record stores the aging we compute, and the ledger is only needed for the
+tie-out.
+
+| Table | What is in it |
+|---|---|
+| `arsc`, the balance fields | The five aging buckets, future, credits, unapplied cash, and COD, as of the last monthly roll |
+| `arsp` | Twelve months of month-end aging per customer |
+| `glsa`, `glet` | Accounts with a balance per period, and the postings behind them |
+| `gletv` | Currency revaluations, with the old and new rate |
+| `sasb` | A log of balance corrections made by hand |
+| `oeehc` | Orders on credit hold. The nearest thing to a stored credit hold |
+| `areta` | In Infor's table list with no description |
+
+## How well SX.e fits
+
+SX.e fits the Spine's documents well and its cash ledger badly. One table, `aret`, holds
+every AR record, which matches `ar_transactions`. SX.e keeps no record of which payment
+settled which invoice.
+
+| Spine table | SX.e tables | Fit | Main issue |
+|---|---|---|---|
+| `clients`, `ledgers` | `sasc` | Good | A company is not always one legal entity |
+| `business_units` | `sastn`, the division list | Good | The division can be blank |
+| `customers`, `customer_accounts` | `arsc`, with terms from `sasta` | Good | Links between customers have no Spine column |
+| `customer_sites`, `site_uses` | `arsc` for the bill-to, `arss` for ship-tos | Good | A ship-to has its own credit limit and balances |
+| `contacts`, `contact_assignments` | `contacts`, `contacts-roles`, `contacts-methods`, and `arsc` for the AP contact | Partial | No role says who to chase |
+| `customer_collection_profiles` | `arsc` | Good | Most columns have a source. None has a dunning setting that SX.e acts on |
+| `ar_transactions` | `aret`, types 0, 1, 4, 5, 6 | Good | No stored open balance |
+| `ar_transaction_lines`, `ar_transaction_tax_lines` | `oeeh`, `oeel`, `addon`, `arett` | Partial | Only invoices from a sales order have lines |
+| `invoice_installments` | `aret`, type 11 | Partial | Rows are replaced when money moves |
+| `receipts` | `aret`, type 7, and `aretp` | Partial | `aretp` exists only if payment reversals are on |
+| `receipt_applications` | `aret`, the paid type 11 rows, linked through `sasj` | Poor | No application table. Reversals change rows in place |
+| `ar_adjustments` | `aret`, the write-off on a paid row, and type 8 debit memos | Partial | No reason code and no approval step |
+| `disputes` | `aret`, the dispute flag on a type 11 row | Poor | A flag with no amount, reason, or date |
+| Reconciliation | `arsc` balances, `glsa`, `glet` | Good | Stored aging buckets are stale between monthly rolls |
+
+## What to settle first
+
+Settle these with the customer before design starts. The
+[discovery questions](/erp/infor-sxe/discovery-questions) page has the full list.
+
+1. How SX.e holds their legal entities: one company, legal entities as divisions, or
+   several companies. It decides what a client is and whether customers are shared.
+2. That they run CloudSuite Distribution, and who their Infor partner is.

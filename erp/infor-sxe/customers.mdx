@@ -1,0 +1,157 @@
+---
+title: "Customers in SX.e"
+sidebarTitle: "Customers"
+description: "How one SX.e customer record becomes a Spine party, account, sites, and contacts"
+icon: "users"
+---
+
+In the Spine a customer is three levels: a `customers` party, a `customer_accounts`
+account that AR transacts on, and `customer_sites` with their uses. People are
+`contacts` with a responsibility on the account. SX.e has one customer record that is
+the party, the account, and the bill-to site at once, with ship-tos and contacts hanging
+off it.
+
+## One SX.e customer becomes
+
+Take customer 10450, a plumbing contractor with two jobs set up as ship-tos and one
+accounts payable clerk. In SX.e that is one `arsc` row, two `arss` rows, and one
+`contacts` row. In the Spine it becomes:
+
+| Spine row | How many | From |
+|---|---|---|
+| `customers` | 1 | The `arsc` row |
+| `customer_accounts` | 1, `account_number` 10450 | The same `arsc` row |
+| `customer_sites` | 3 | The `arsc` address as the primary site, and one per `arss` row |
+| `site_uses` | `bill_to` on the primary site, `ship_to` on the two jobs | |
+| `contacts` | 1 | The `contacts` row, through its link to customer 10450 |
+| `contact_assignments` | 1, `dunning` | Derived. See [who to chase](#who-to-chase) |
+
+Put the company number in every identifier, because two companies can use the same
+customer number.
+
+| Spine column | SX.e | Note |
+|---|---|---|
+| `customers.name` | `arsc.name` | |
+| `customers.tax_id` | `arsc.gstreg` | A GST or VAT registration. SX.e has no general tax id |
+| `customer_accounts.account_number` | `arsc.custno` | As text |
+| `customer_accounts.payment_terms` | `arsc.termstype` | The description is in `sasta` where `codeiden` is `T` |
+| `customer_accounts.credit_limit` | `arsc.credlim` | Zero means no limit. Store it as NULL |
+| `customer_accounts.customer_class` | `arsc.custtype` | `arsc.class` is a profitability rank and is the wrong source |
+| `customer_accounts.status` | `arsc.statustype` | Active or inactive |
+| `customer_accounts.credit_hold` | `arsc.selltype` | Derived. See below |
+| `site_uses`, `statements` | `arsc.statementty` | When the value is `O` |
+| `external_system_identifier` | `cono`, `custno` | `{cono}:{custno}` |
+
+## credit_hold is derived
+
+The Spine has one boolean. SX.e stores no hold flag. It decides a hold at order entry
+from a status code, the aging, and the credit limit, and only the status is stored, in
+`arsc.selltype`.
+
+| Code | SX.e meaning | `credit_hold` |
+|---|---|---|
+| `Y` | Orders allowed | False |
+| `N` | No orders. SX.e calls this credit hold | True |
+| `C`, `D` | Cash only, COD only | False |
+| `H` | Hold until the date in `arsc.statusdt` | True before the date |
+| `O` | Open until the date in `arsc.statusdt` | True after the date |
+
+An example. Customer 10450 has `selltype` of `H` and `statusdt` of 15 October. Their
+`credit_hold` is true until 15 October and false from then on, so the adapter has to
+re-derive it each night. Infor documents every value. The code `C` is not in Infor's
+documentation and comes from a public field dictionary.
+
+The other two reasons SX.e holds orders, a balance in an old aging bucket and a balance
+over the limit, Spinal works out from its own aging.
+
+## A ship-to is a site that behaves like an account
+
+In the Spine a site is an address with purposes, and the credit settings live on the
+account. An SX.e ship-to, `arss`, is an address that can also carry its own terms,
+credit limit, hold period, and stored balances. Construction distributors set up each
+job as a ship-to, with the lien filing deadline on it.
+
+An example. Customer 10450's job "Riverside Tower" is ship-to `RIV1` with a credit limit
+of 25,000 and a lien deadline 90 days after the first sale. In the Spine it is a
+`customer_sites` row with `erp_site_code` of `RIV1`, a `site_uses` of `ship_to`, and a
+`customer_collection_profiles` row with `site_use_id` set and
+`customer_credit_limits.overall_credit_limit` of 25,000. The lien deadline has no
+column.
+
+A document carries its ship-to in `aret.shipto`, and blank means the customer's own
+site. Keep inactive ship-tos, because open documents can still point at them.
+
+## Contacts have no responsibility
+
+In the Spine a contact has a responsibility on an account, and `dunning` is how we know
+who to chase. SX.e contacts are people with no role. They sit in `contacts`, link to
+customers through `contacts-roles`, and keep their emails and phones in
+`contacts-methods`.
+
+| Spine column | SX.e |
+|---|---|
+| `contacts` row | A `contacts-roles` row with `roletype` of `arsc` or `arss` and `primarykey` of the customer number |
+| `contacts.name` | `contacts.firstnm` and `contacts.lastnm` |
+| `contacts.email`, `contacts.phone` | The `contacts-methods` row with `primaryfl` set |
+| `contacts.do_not_email`, `contacts.do_not_call` | `contacts.donotemailfl`, `contacts.donotcallfl` |
+
+An example. One accounts payable clerk is linked to three customers in SX.e. In the
+Spine she is three `contacts` rows, one per party, because a Spine contact belongs to
+one party. Her work email, the `contacts-methods` row with `primaryfl` set, fills
+`contacts.email` on all three.
+
+## Who to chase
+
+The **Dunning** check box on the customer, `arsc.dunningfl`, is information only. Infor
+says no report uses it. So the `dunning` responsibility is assigned by rule, taking the
+first that finds a contact.
+
+1. The email addresses the customer selected for statements. They are probably in
+   `email-links`, whose columns are not documented.
+2. Contacts whose `contacts.contacttype` the customer says means accounts payable.
+3. The **Vendor Manager** on the customer record, `arsc.apmgr`. Infor describes this
+   person as the one to contact about credit problems. It has a phone and no email.
+4. The customer's general email, `arsc.email`.
+
+An example. Customer 10450 emails statements to `ap@contractor.example`, has one
+contact with type `AP`, and has "J. Smith" as vendor manager. Rule 1 finds the statement
+address, so it becomes the `dunning` contact and the other two rules are not used. If
+no rule finds anyone, leave the account without a dunning contact so it shows as a data
+gap.
+
+## Links the Spine cannot hold
+
+SX.e has three links from one customer record to another. The Spine has no
+account-to-account column.
+
+- **Statements to Customer.** Three branches are three customers, each with its own
+  invoices, and head office is a fourth. Each branch's record points at head office, so
+  head office receives one statement for all three, and a credit hold on head office
+  holds the branches too. In Spine terms, the debt sits on the branch account but the
+  people to chase sit on head office's. The workaround is to attach head office's
+  people to each branch account as its `dunning` contacts.
+- **Invoice To.** A dealer's goods are billed to a finance company under a floor plan.
+  This works as it does for Oracle Fusion: the invoice's `customer_account_id` is the
+  finance company, and we chase the finance company. The dealer is not kept. The
+  columns are `arsc.custno2` and `arsc.fpcustno`, and sources disagree on which is
+  which.
+- **Customer master group**, `arsc.groupid`. Several customers share one credit limit.
+  Each account looks fine on its own while the group is over its limit.
+
+## Check on the data
+
+These come from the tables once we have access.
+
+| Question | Where to look |
+|---|---|
+| Do they use ship-tos as jobs? | `arss` rows with `jobdesc` or the lien fields filled |
+| Who receives statements, and how? | `arsc.estmttype`, and the rows in `email-links` |
+| Which contact types exist? | `sasta` where `codeiden` is `CT`, with their descriptions |
+| Do they use **Statements to Customer**, **Invoice To**, or groups? | Counts of non-blank `arsc.custno2`, `arsc.fpcustno`, and `arsc.groupid` |
+
+## Ask the customer
+
+The data cannot answer these.
+
+1. Whether collectors chase by job or by customer.
+2. Which contact type means accounts payable, if the descriptions do not say.
