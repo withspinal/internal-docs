@@ -1,0 +1,150 @@
+---
+title: "Organisation, currency, and tax in SX.e"
+sidebarTitle: "Organisation"
+description: "How SX.e's company and division fill the Spine's clients, ledgers, and business units"
+icon: "sitemap"
+---
+
+In the Spine, a group holds clients, each client is a legal entity with a ledger and at
+least one business unit, and every AR row carries its client and business unit. SX.e
+has two levels that can fill that tree: the company and the division. Which one fills
+which Spine level depends on how the customer uses them.
+
+## The three shapes
+
+Take a distributor with a head office and two branches. SX.e lets them set that up three
+ways, and each gives a different Spine tree.
+
+| SX.e setup | Spine clients | Spine business units | Ledgers | Accounts |
+|---|---|---|---|---|
+| One company, branches as divisions | One | Division 10, division 20, and a default | One | Shared across the business units |
+| One company, legal entities as divisions | One per division | One default each | One, shared by all clients | Shared across the clients |
+| One company per legal entity | One per company | One default each | One per client | Duplicated per company, with nothing linking them |
+
+The first two are easy. The third is awkward, because the Spine's account is shared
+across clients and SX.e gives us two unrelated customer records. Finding out which shape
+the customer has is
+[the most important discovery question](/erp/infor-sxe/discovery-questions#the-most-important-question).
+
+## The company is the client and the ledger
+
+An SX.e company, `cono`, has its own legal name, tax ids, currency, fiscal calendar,
+chart of accounts, operators, and customers. Every table carries the company number,
+and every key starts with it. In Spine terms, one company is one `clients` row and one
+`ledgers` row.
+
+| Spine column | SX.e |
+|---|---|
+| `clients.erp_legal_entity_code` | `sasc.cono` |
+| `clients.name` | `sasc.name` |
+| `ledgers.erp_ledger_id` | `sasc.cono`. SX.e has one set of books per company and no ledger id |
+| `ledgers.currency_code` | `sasc.currencyty`, a two-character code to translate to ISO |
+
+Test and training companies share the database, so ask which company numbers are live.
+
+## The division is the business unit
+
+In the Spine, the business unit is the stripe on every AR row that decides who may see
+it. SX.e's division, `divno`, is that stripe. It is on every invoice and every payment,
+SX.e's own reports total by it, and SX.e restricts operators by it.
+
+| Spine row | Where SX.e puts the division |
+|---|---|
+| `ar_transactions` | `aret.divno`. Blank unless the company's **Divisional** option is on |
+| `receipts` | `aret.divno`. Always set |
+| `customer_accounts` | `arsc.divno`. The customer's home division. Can be blank |
+
+An example. A customer's home division is 10. They buy from a warehouse in division
+20, and the invoice posts with division 20. In the Spine that invoice belongs to
+business unit 20, not 10, so read the division from the row and never from the account.
+A row with a blank division goes to the client's default business unit.
+
+The warehouse is not a candidate for the business unit. A payment and a transaction
+typed into AR carry no warehouse.
+
+## When the division is the client
+
+Some distributors run several legal entities as divisions of one company, with each
+division carrying its own tax id and address, in `sastn.fedtaxid` and `sastn.addr`.
+In Spine terms each division is then a client with one default business unit, and all
+of them share the company's ledger.
+
+An invoice in division 20 then lands as `client_id` of the division 20 client and
+`business_unit_id` of its default business unit. The customer record stays shared,
+which is the Spine's own shape. For this to work, every AR row needs a division, so the
+company's **Divisional** option has to be on.
+
+## Accounts are shared within a company only
+
+In the Spine an account belongs to the group and is shared by every client. SX.e shares
+a customer record across divisions, which matches, and never across companies. The same
+head office set up in company 1 and company 2 is two `arsc` rows, each with its own
+balance, and they may not even share a customer number. Put `cono` in every account
+identifier.
+
+## A document's currency comes from the account
+
+In the Spine every document carries its currency. In SX.e a document has no currency
+column. It is in its customer's currency, `arsc.currencyty`, or the sales order's,
+`oeeh.currencyty`, and blank means the company's currency.
+
+An example. A company keeps its books in USD. A customer is set to CAD. Their invoice has
+`aret.amount` of 1,000, meaning CAD, and `aret.exchgrate` of 0.74. In the Spine that is
+`original_amount` 1,000 in CAD and `accounted_amount` 740 in the ledger's USD.
+
+Two traps affect `accounted_amount`. Changing a customer's currency does not convert
+their existing documents. The revaluation report, run in update mode, overwrites the
+rate on open documents.
+
+A company is single-currency when the currency table, `sastc`, is empty. Most
+distributors are.
+
+## gl_date is the posting date
+
+In the Spine a document has a `transaction_date` and a `gl_date`. SX.e has the same
+pair: `aret.invdt` and `aret.postdt`. An invoice dated 30 September but posted in a
+journal opened on 2 October has `transaction_date` 30 September and `gl_date` 2
+October, and SX.e's trial balance as of 30 September leaves it out.
+
+SX.e has no single AR control account. A company can have several, and the Customer
+Trial Balance Report prints each. The
+[reconciliation page](/erp/infor-sxe/reconciliation) covers the tie.
+
+## tax_amount is four amounts
+
+The Spine holds one `tax_amount` per document and per line. SX.e holds four per
+document, in `oeeh.taxamt`, and four per line, in `oeel.taxamount`: state, county, city,
+and other. Sum them. Jurisdiction codes and rates are in `arett`, one row per order,
+and with a third-party tax engine Infor says tax reporting is done in the engine.
+
+## Access is granted per division
+
+In the Spine a user is granted business units, and the set becomes their
+`VisibleScope`. SX.e grants an operator a list of allowed divisions, switched on per
+module by **Restrict Data Access For AR**.
+
+An example. An operator has allowed divisions 10 and 20 and the AR switch on. In the
+Spine they get grants on business unit 10, business unit 20, and the default business
+unit, because SX.e shows rows with a blank division to every operator.
+
+An operator record, `sasoo`, is per company. A person in two companies has two, linked by
+the **IFS User** field. The column that holds the allowed divisions is not confirmed.
+
+## Check on the data
+
+These come from the tables once we have access.
+
+| Question | Where to look |
+|---|---|
+| How many companies, and which are live? | Rows in `sasc`, and which company numbers have recent rows in `aret` |
+| Are divisions on AR rows? | Whether `aret.divno` is ever blank |
+| Do divisions carry tax ids? | `sastn.fedtaxid` on the division list |
+| Any foreign currency? | Rows in `sastc`, and non-blank `arsc.currencyty` |
+| Any restricted operators? | `sasoo`, once the allowed-divisions column is confirmed |
+
+## Ask the customer
+
+The data cannot answer these.
+
+1. Whether their divisions are legal entities or branches. The data shows tax ids on
+   divisions. Only the controller can say what they mean.

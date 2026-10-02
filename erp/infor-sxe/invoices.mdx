@@ -1,0 +1,145 @@
+---
+title: "Invoices in SX.e"
+sidebarTitle: "Invoices"
+description: "How an SX.e invoice becomes a Spine document with installments, and where its open balance comes from"
+icon: "file-invoice"
+---
+
+A Spine document is one `ar_transactions` row with one or more `invoice_installments`.
+SX.e stores both in the same table, `aret`, and tells them apart with a type code. This
+page says how to read that table as documents and installments.
+
+## One table holds every AR row
+
+Every row in `aret` has a type code in `aret.transcd`. The code says which Spine table
+the row belongs in. Infor documents the codes in
+[Customer Transaction Entry](https://docs.infor.com/sxe/latest/en-us/sxolh/sx_aret-master.html).
+
+| Code | SX.e name | In Spine terms |
+|---|---|---|
+| 0 | Invoice | `ar_transactions`, type `invoice` |
+| 1 | Service charge | `ar_transactions`, type `interest_note` |
+| 2 | Rebate | Nothing. It has no effect on the balance |
+| 3 | Unapplied cash | A receipt's `unapplied_amount`. See [receipts](/erp/infor-sxe/receipts#the-unapplied-amount-is-a-row-not-a-number) |
+| 4 | COD invoice | `ar_transactions`, type `invoice` |
+| 5 | Miscellaneous credit | `ar_transactions`, type `credit_memo`. See [credit notes](/erp/infor-sxe/credit-notes) |
+| 6 | Credit memo | `ar_transactions`, type `credit_memo`. See [credit notes](/erp/infor-sxe/credit-notes) |
+| 7 | Check record | `receipts`. See [receipts](/erp/infor-sxe/receipts) |
+| 8 | Debit memo | `ar_adjustments`. See [debit memos](#a-debit-memo-is-an-adjustment) |
+| 9 | Reversal | Nothing. It voids its target |
+| 11 | Scheduled pay | `invoice_installments` |
+
+Code 10 appears in no source. SX.e has no chargeback type.
+
+## An invoice is a document row plus its installments
+
+Infor's sample report shows an invoice on split terms. In Spine terms it is one document
+and two installments.
+
+| SX.e row | Type | In Spine terms | Amount | Due |
+|---|---|---|---|---|
+| Invoice `870-00` | 0 | The document, `original_amount` 6112.05 | 6112.05 | |
+| Scheduled pay 1 | 11 | Installment 1 | 3056.03 | 20 February |
+| Scheduled pay 2 | 11 | Installment 2 | 3056.02 | 7 March |
+
+Every document has at least one installment, so the Spine never has to mint a synthetic
+one. The due date lives on the installment, as the Spine expects.
+
+`transaction_number` is the invoice number and suffix, printed as `870-00`. The number
+is the sales order number. A suffix of 00 to 98 means the invoice came from a sales
+order and has lines. A suffix of 99 means it was typed into AR and has none.
+
+## Installments are replaced, not reduced
+
+In the Spine an installment's `balance_due` falls as it is paid. SX.e closes the
+installment and writes new ones for what is left. A partial payment, a credit, a debit
+memo, and a manual split all do this.
+
+Infor's sample: 200.00 paid against invoice `871-00` for 337.49. Installment 1 closes with
+200.00 paid. Installments 2 and 3 appear, open, for 68.75 and 68.74.
+
+Two things follow:
+- Attach outreach history to the document, not the installment. An installment that
+  exists today can be closed tomorrow with new ones carrying the balance.
+- Load a closed installment only if it was paid. One closed by a split was replaced by
+  its successors, and loading both counts the amount twice.
+
+A paid document can reopen when a payment is reversed, so keep reading closed documents.
+
+## open_amount is computed
+
+`aret` stores no open balance. In Spine terms, a document's `open_amount` is the sum of
+its open installments: `aret.amount` over the document's active scheduled pay rows. This
+matches Infor's sample, and we found no documented rule, so validate it against the
+customer's trial balance before trusting it.
+
+We do not know whether `aret.amount` is stored signed on credit rows. Set the sign from
+the type code.
+
+## The document's columns
+
+The document row supplies most columns. Currency and tax come from the sales order behind it.
+
+| Spine column | SX.e | Note |
+|---|---|---|
+| `business_unit_id` | `aret.divno` | See [organisation](/erp/infor-sxe/org-structure#the-division-is-the-business-unit) |
+| `customer_account_id` | `aret.custno` | |
+| `source_document_type` | `aret.transcd` and the order type in `oeeh.transtype` | Such as `IN/SO`, or `IN/AR` for suffix 99 |
+| `transaction_date` | `aret.invdt` | |
+| `gl_date` | `aret.postdt` | |
+| `currency` | `oeeh.currencyty`, or `arsc.currencyty` with no sales order | See [currency](/erp/infor-sxe/org-structure#a-documents-currency-comes-from-the-account) |
+| `original_amount` | `aret.amount` on the document row | |
+| `tax_amount` | `oeeh.taxamt`, four elements summed | NULL with no sales order |
+| `external_system_identifier` | `cono`, `custno`, `jrnlno`, `invno`, `invsuf`, `seqno` | See [keys](/erp/infor-sxe/data-access#keys) |
+
+Installment columns come from the scheduled pay row: `sequence` from `aret.seqno`,
+`due_date` from `aret.duedt`, `original_amount` from `aret.amount`, `status` from
+`aret.statustype`, `amount_paid` from `aret.paymtamt`, and `closed_date` from
+`aret.paymtdt`.
+
+## Lines come from the sales order
+
+In Spine terms, `ar_transaction_lines` are the sales order lines, and SX.e keeps them on
+the order, not the invoice. Join `oeel` to the document on `orderno = invno` and
+`ordersuf = invsuf`. A document with suffix 99 has no lines.
+
+| Spine column | SX.e | Note |
+|---|---|---|
+| `line_number` | `oeel.lineno` | |
+| `quantity` | `oeel.qtyship` | |
+| `unit_price` | `oeel.price` | |
+| `line_amount` | `oeel.netamt` | Return orders store positive amounts. Multiply by -1 when `oeeh.transtype` is `rm` |
+| `tax_amount` | `oeel.taxamount`, four elements summed | State, county, city, other |
+
+Skip a line with `oeel.specnstype` equal to `L`. It was cancelled. Freight and other
+charges are rows in `addon`.
+
+## A debit memo is an adjustment
+
+In the Spine a `debit_memo` is a document with its own open balance. An SX.e debit memo
+owns no balance. It is closed as soon as it is posted, and the money is owed through a
+new installment on the invoice it names. A `debit_memo` document with a balance would
+count the amount twice.
+
+So map it as an `ar_adjustments` row on the invoice, positive, with
+`adjustment_type = correction`, and load the new installment. The invoice it names
+appears to be in `aret.appinvno` and `aret.appinvsuf`.
+
+## COD invoices
+
+A COD invoice is an `invoice` whose invoice date and due date are the same. SX.e keeps it
+in a separate customer balance and leaves it off statements. Set
+`exclude_from_collections` on its installments until the customer says whether they
+chase COD.
+
+## Check on the data
+
+Once we have access, these come from the tables themselves. Nothing on this page needs
+the customer.
+
+| Question | Where to look |
+|---|---|
+| Are credit rows stored negative? | The sign of `aret.amount` on rows with type code 5 or 6 |
+| Which type codes exist? | `aret.transcd`, grouped with a count. Look for a code 10 |
+| Do any terms split an invoice? | Documents with more than one scheduled pay row |
+| How are short payments recorded? | Type code 8 rows against closed scheduled pay rows with `aret.pifamt` set |

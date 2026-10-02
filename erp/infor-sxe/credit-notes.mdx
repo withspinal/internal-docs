@@ -1,0 +1,102 @@
+---
+title: "Credit notes in SX.e"
+sidebarTitle: "Credit notes"
+description: "How SX.e's two kinds of credit become Spine credit memos and their applications"
+icon: "file-circle-minus"
+---
+
+In the Spine a credit note is an `ar_transactions` row of type `credit_memo` with
+negative amounts, and applying it to an invoice is a `receipt_applications` row with
+`receipt_id` NULL and `funding_source = credit_memo`. SX.e has two kinds of credit, and
+they differ in whether that application exists from birth.
+
+## Two kinds of credit_memo
+
+SX.e splits what the Spine calls a credit memo into a credit that is applied at birth and a credit that waits on the account.
+
+| SX.e record | Type code | In Spine terms |
+|---|---|---|
+| Credit memo (CM) | 6 | A `credit_memo` whose `open_amount` is always 0, plus one application written at the same moment, against the one invoice the CM names |
+| Miscellaneous credit (MC) | 5 | A `credit_memo` with an open balance. Its applications come later, when someone applies it |
+
+A CM can never exceed its invoice's remaining balance. If the credit is larger, SX.e
+applies what fits as a CM and writes an MC for the rest.
+
+Both carry negative `original_amount` in the Spine. Set the sign from the type code,
+because we don't know whether SX.e stores credits negative.
+
+## Where credits come from
+
+Most credits start as a return order or a correction order in sales order entry. The
+invoice suffix tells us which kind we got.
+
+| Source | Becomes |
+|---|---|
+| A return or correction order that names an invoice, with **Auto Apply Credit to Original Invoice** on | A CM. The application already exists |
+| A return or correction order with no invoice, or without auto apply | An MC |
+| A sales order whose total is negative | An MC |
+| A credit typed into AR, suffix 99 | A CM or an MC, as the clerk chose |
+
+A credit from an order has `ar_transaction_lines`, read from `oeel` like an invoice with
+the sign flipped. A credit typed into AR has no lines. Put the record and its origin in
+`source_document_type`, such as `CM/RM` or `MC/AR`.
+
+## Applying an MC writes applications
+
+A clerk applies an MC in cash receipts entry with the posting type **Apply Credits**. One
+MC can settle several invoices. In Spine terms, each invoice installment it settles gets
+an application with `receipt_id` NULL and `funding_source = credit_memo`.
+
+SX.e records no amount per credit and invoice pair. The only link is the posting journal
+on the settled installment, which appears to be in `aret.crjrnlno` and `aret.crsetno`.
+When one posting applies several credits to several invoices, the adapter has to split
+the amounts itself.
+
+SX.e has no function that unapplies a credit. A wrongly applied credit is corrected by
+hand, and the correction looks like a new debit and a new credit.
+
+## A partly applied MC is replaced, not reduced
+
+In the Spine, applying part of a credit lowers its `open_amount`. SX.e closes the MC and
+writes what is left as a new record. What that record is depends on the setting
+**Resequence Unapplied Credits**.
+
+| Setting | What is left | In Spine terms |
+|---|---|---|
+| On | New records that keep the MC's number with new sequence numbers | Key the `credit_memo` on the number without the sequence, and sum the active sequences for `open_amount` |
+| Off, the default | One unapplied cash record for the leftover of every credit in the posting, with no link back | Treat the new record as a new `credit_memo`, and write an application with `transaction_id` NULL against each original credit for the amount that moved |
+
+With the setting off, treating the leftover as cash would let credit value fulfil a
+promise to pay, so it stays a credit.
+
+## The application cannot name its credit
+
+`receipt_applications` has no column for which credit memo funded it. The proposed
+`source_transaction_id` is not built. For a CM this costs little, because a CM is
+applied once to the invoice it names. For an MC it means a collector cannot confirm that
+a promised credit landed on the disputed invoice. Until the column exists, put the
+credit's key in the application's `external_system_identifier`.
+
+## A refund is an invoice paid by a credit
+
+To refund a credit balance, Infor's
+[documented procedure](https://docs.infor.com/sxe/latest/en-us/sxolh/wdt1503926014849.html)
+creates a manual invoice with suffix 99, applies the credit to it, and has accounts
+payable send a cheque. In Spine terms it looks like a real `invoice` settled by a
+`credit_memo`. It must not reach a collections run. It can only be recognised by its
+general ledger account or reference text, which are the customer's own convention.
+
+## Check on the data
+
+These come from the tables once we have access.
+
+| Question | Where to look |
+|---|---|
+| Is **Resequence Unapplied Credits** on? | What is left after a partial application. New sequence numbers under the credit's own number mean on. A single `0-00` unapplied cash row means off |
+
+## Ask the customer
+
+The data cannot answer these.
+
+1. How they refund a credit balance, and what marks the clearing invoice.
+2. How they correct a credit applied to the wrong invoice.

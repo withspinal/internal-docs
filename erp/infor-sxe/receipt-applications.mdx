@@ -1,0 +1,123 @@
+---
+title: "Receipt applications in SX.e"
+sidebarTitle: "Receipt applications"
+description: "How SX.e records that a payment settled an invoice, and how to rebuild the Spine's application ledger from it"
+icon: "link"
+---
+
+A Spine receipt application is one row saying which receipt settled which installment,
+for how much, on what date. SX.e has no such row. The application is the installment
+itself, after it was paid. This is the hardest part of the mapping.
+
+## The application is the paid installment
+
+In Spine terms, when a payment is applied, SX.e takes the open `invoice_installments`
+row, marks it closed, and writes the payment onto it. One SX.e row becomes both our
+closed installment and our application.
+
+| Spine column on `receipt_applications` | Where SX.e wrote it on the paid row |
+|---|---|
+| `amount_applied` | `aret.paymtamt` |
+| `discount_taken` | `aret.discamt` |
+| `application_date` | `aret.paymtdt` |
+| `installment_id` | The row itself |
+| `transaction_id` | The document with the same `invno` and `invsuf` |
+| The receipt | `aret.checknopaid`, the cheque, and `aret.crjrnlno` and `aret.crsetno`, the posting journal |
+| `gl_date` | `sasj.postdt` of that posting journal |
+
+Both public schemas have these columns. The names match the screen labels **Paid Check
+#** and **Applied Journal #**, but no Infor document names the columns, so confirm them
+on the customer's data.
+
+## Finding the receipt
+
+The Spine wants `receipt_id` on every application. Whether SX.e gives us a foreign key
+depends on one setting, **Allow AR Payment Reversals**.
+
+| Setting | How the application finds its receipt |
+|---|---|
+| On | A foreign key. `aret.payrowpointer` on the paid row points at the payment record in `aretp` |
+| Off | A match on values. The paid row's cheque number and posting journal equal the check record's `checkno`, `jrnlno`, and `setno`, for the same customer |
+
+The setting only covers payments entered after it was switched on, so most customers
+need both methods. The matching method has edge cases: cash payments all share cheque
+number zero, so the journal has to carry the match.
+
+Lockbox payments may have a third source. A public dictionary lists `arbcl`, with one
+row per invoice a lockbox cheque paid, holding the invoice number, sequence, and amount
+applied. That is a true application table, for lockbox only.
+
+## A partial payment closes the installment
+
+In the Spine, a partial payment leaves the installment open with a lower `balance_due`.
+SX.e closes the installment at the amount paid and creates new installments for the
+rest.
+
+Infor's sample: a payment of 200.00 against invoice `871-00` for 337.49.
+
+| Installment | Status | `balance_due` | Application |
+|---|---|---|---|
+| 1 | Closed | 0 | 200.00 |
+| 2 | Open | 68.75 | |
+| 3 | Open | 68.74 | |
+
+We never see `balance_due` fall. We see the installment close and two new ones appear.
+The application points at the closed one.
+
+## Not every closed installment was paid
+
+A split, a credit, and a reversal also close an installment. Infor's activity report
+prints which it was, as `(CK 1042)`, `(CR Applied)`, or `(Reversed)`, but the field that
+stores it is not documented. Write an application only for installments closed by a
+payment. This is the first thing to confirm on the customer's data.
+
+## Discounts and write-offs
+
+`discount_taken` is `aret.discamt`. SX.e puts earned and late discounts in the same
+field. The discount date, `aret.discdt`, against the pay date tells them apart.
+
+A short payment that the clerk wrote off becomes an `ar_adjustments` row on the
+invoice, negative, with the amount from `aret.pifamt`. SX.e has no reason code or
+approval step for a write-off, so the row lands with `status = approved`.
+
+We do not know whether `aret.paymtamt` includes the discount. `amount_applied` must not.
+
+## funding_source
+
+The kind of row that funded the application decides the value.
+
+| What funded the application | `funding_source` |
+|---|---|
+| A payment applied in the same posting | `cash` |
+| Unapplied cash from an overpayment | `overpayment` |
+| Unapplied cash from a payment on account | `advance` |
+| A deposit taken on the order | `deposit` |
+| A credit memo or miscellaneous credit | `credit_memo`, with `receipt_id` NULL |
+
+## Reversals
+
+In the Spine a reversal is a new application row with the negative amount and
+`reverses_application_id` set. SX.e edits rows instead: it flags the receipt, marks the
+paid installments as reversed, and creates new open installments from them.
+
+So the adapter writes what SX.e does not.
+
+| SX.e does | The adapter writes |
+|---|---|
+| Sets `aret.reversedfl` on the check record | `reversed_at` on the receipt |
+| Marks the paid installments as reversed and creates new ones | A negative application row for each, dated with the reversing journal |
+| Creates unapplied cash on the right customer, for a wrong-customer reversal | A new receipt for that customer |
+
+Seeing a reversal means comparing each sync with the last. An application loaded
+yesterday can be gone today.
+
+## Check on the data
+
+All three come from the tables. Pull the rows behind one cheque that paid two invoices
+in full, one in part, and left a remainder, and the same payment after it was reversed.
+
+| Question | Where to look |
+|---|---|
+| Which field says how a scheduled payment was closed? | On closed scheduled pay rows, which of `checknopaid`, `crjrnlno`, and `reversedfl` is set in each case. Compare with the customer's activity report |
+| Does `paymtamt` include the discount? | Rows with `discamt` above zero: whether `amount` equals `paymtamt`, or `paymtamt` plus `discamt` |
+| Does the journal number change when a scheduled payment is paid? | `jrnlno` on a closed scheduled pay row against `jrnlno` on its document row |
