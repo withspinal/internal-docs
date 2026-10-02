@@ -235,29 +235,66 @@ reply on the desk inbox but cannot act on its issues.
 
 Since 1 October 2026 (Linear milestone E, spec `dashboard-backend/specs/october-2026/chasing-segments/spec.md`)
 a desk chases through **segments**, and the campaign object is gone from the product. Read this
-before touching the planner, the campaign tables or the Chasing page.
+before touching the planner, the campaign tables or the Chasing page. Audiences by class or by
+name, matching in the request and the recipient rule came on 2 October 2026 (Linear milestone B,
+spec `specs/october-2026/desk-audiences-and-site-use-recipients/spec.md`).
 
 **The book.** A desk chases every customer account with an open, collections-eligible invoice
 installment in one of its units. That set is the book; the Chasing page's coverage line is
 "chased accounts over the book". Nobody picks accounts.
 
-**Segments.** An ordered list per desk. Each segment is a rule over accounts (customer class,
-open balance over an amount in a named currency, days overdue, payment plan in arrears, credit
-hold; several predicates AND together, another segment is the OR) and a chase mode: a dunning
-ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account).
-Accounts match top to bottom and the first match wins; "Everyone else" is the catch-all and is
-always last. Every desk is born with its catch-all, draft and manual, so a new desk chases
-nobody until someone activates a ladder. A draft segment is not matched; it only shows how
-many accounts it would take.
+**Segments.** An ordered list per desk. Each segment is an audience and a chase mode: a dunning
+ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account). You
+pick the audience first, then how it is chased. Accounts match top to bottom and the first match
+wins. "Everyone else" is the catch-all and is always last. Every desk is born with its catch-all,
+draft and manual, so a new desk chases nobody until someone activates a ladder.
 
-**Matching is materialised.** The hourly planner sweep walks the book through the live
-segments and writes one row per account into `collection_desk_segment_accounts`, which is
-UNIQUE on (desk, account): one segment per account per desk, enforced by the database. A
-changed match is a move: the old segment's planned reminders (the consolidated email included)
-end with reason `moved`, never a user cancel, and the new segment plans in the same sweep.
-Reordering is the only way two segments can want one account, and the sweep settles it. An
-account a person excludes ("Stop chasing on this desk" on the account card) is never matched
-again until the exclusion is lifted.
+**Audiences.** An audience is a rule over accounts. The page offers two kinds today: customer
+class is one of a list, or a hand-picked list of customers found by name (up to 1,000). The
+backend also evaluates open balance over an amount in a named currency, days overdue, payment
+plan in arrears and credit hold. Those four are built and tested but not offered on the page yet.
+Several predicates in one rule AND together, and another segment is the OR. A customer picked
+into two segments goes to the higher one. A hand-picked customer who owes nothing stays in the
+rule and is matched when an invoice appears.
+
+The picker reads the desk's customers: every account with a site use or an invoice in one of the
+desk's units, from `GET /collection-desks/<desk_id>/chasing/customers`. The classes come from
+`GET /collection-desks/<desk_id>/chasing/customer-classes`. Both go through
+`customer_accounts_in_scope` under the desk's scope. Do not write a second definition of which
+customers a desk has.
+
+**Matching is materialised.** `match_desk` walks the book through the live segments and writes
+one row per account into `collection_desk_segment_accounts`, which is UNIQUE on (desk, account):
+one segment per account per desk, enforced by the database. It runs in three places. It runs in
+the request after every write that changes who a segment holds: activate, a rule edit on a live
+or paused segment, reorder, delete, lifting an exclusion, and a change to the desk's units (for
+the desk and for each desk a unit left). It runs after each ERP load, which is how a customer
+newly synced from Oracle reaches its segment. It runs in the hourly planner sweep, which catches
+everything else. If a match raises inside a request, the write is kept, the error is logged and
+the sweep retries.
+
+A draft segment is not matched, because a draft that held accounts would pull them out of the
+live segments below it. Its accounts list shows the customers it would take if you activated it
+where it sits, so a new segment shows its customers as soon as it is saved.
+
+A changed match is a move: the old segment's planned reminders (the consolidated email included)
+end with reason `moved`, never a user cancel, and the new segment plans straight away.
+Reordering is the only way two segments can want one account. An account a person excludes
+("Stop chasing on this desk" on the account card) is never matched again until the exclusion is
+lifted.
+
+**Who gets the email.** `DunningContactResolver` picks one recipient per account and unit, in
+this order. First, a contact tagged DUNNING on a site with a DUNNING site use for the unit.
+Second, a contact tagged DUNNING on the account. Third, any contact on a site that has a BILL_TO
+site use for the unit. Oracle's extract tags no contact as DUNNING and sends no DUNNING site
+uses, so for an Oracle-fed group the third rank is the one that resolves. That is what "contacts
+derive from the bill-to site use" means in code. The third rank only returns a contact with an
+email address who is not flagged do-not-contact or do-not-email, and it applies to email only.
+
+When a bill-to site has several contacts, the pick is stable but not meaningful. The order is
+the unit's own site use, then the primary site use, then the oldest assignment, and on Oracle
+data the last step is the order of the extract. Fusion's primary flag on the contact role is not
+kept. Correct a wrong recipient on the reminder itself. Do not add a second resolver.
 
 **Not chased** has one meaning: accounts no active segment reaches, accounts an active ladder
 holds but nobody can be emailed for in any desk unit, accounts under a paused segment, excluded
@@ -313,5 +350,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
 | Desk stamp, sync gate, inbox and tasks on the stamp | `dashboard-backend/specs/october-2026/desk-owns-the-mailbox/spec.md` (supersedes `desk-inbox-and-tasks`); derivation in `services/collection_desks/stamp.py` |
+| Audiences by class or by name, matching in the request, the recipient rule | `dashboard-backend/src/services/dunning_contact_resolver.py` and the files above; spec `specs/october-2026/desk-audiences-and-site-use-recipients/spec.md` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
