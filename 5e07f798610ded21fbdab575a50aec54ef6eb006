@@ -1,0 +1,23 @@
+index.mdx
+  s_ee93c871e3c605::t_ae32ab188fa766 39-42
+product/collection-desks.mdx
+  s_ee93c871e3c605::t_04244a4e5edf93 1-136
+docs.json
+  s_ee93c871e3c605::t_ae32ab188fa766 48-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5e07f798610ded21fbdab575a50aec54ef6eb006",
+  "prompts": {},
+  "sessions": {
+    "s_ee93c871e3c605": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "32942bca-74c9-4e5d-9b78-66f0a0778404",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Taine de Buys <taine@withspinal.com>"
+    }
+  }
+}

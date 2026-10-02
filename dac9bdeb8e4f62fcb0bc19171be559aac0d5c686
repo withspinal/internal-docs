@@ -1,0 +1,19 @@
+product/collection-desks.mdx
+  s_ee93c871e3c605::t_545f4d4522db6e 96-132,153-154,157-162,164-168,170-174,178-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dac9bdeb8e4f62fcb0bc19171be559aac0d5c686",
+  "prompts": {},
+  "sessions": {
+    "s_ee93c871e3c605": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "32942bca-74c9-4e5d-9b78-66f0a0778404",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Taine de Buys <taine@withspinal.com>"
+    }
+  }
+}
