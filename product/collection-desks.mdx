@@ -79,12 +79,19 @@ outbound address, branding of the units their grants cover). The role is recorde
 milestone C, where managers approve agent actions. Creating a desk, deleting it, and
 moving it to another mailbox stay with the group admin.
 
+A desk belongs to one group and exists only for sessions signed into that group. The
+desk list, every desk page and link, and desk creation follow the group the person picked
+at sign-in (`scope.group_id` from `require_scope`), so an admin of two groups never sees,
+opens or builds one group's desk from a session in the other. A desk outside the
+signed-in group is a uniform 404; creating one there is a 403.
+
 Who sees a desk is the desk's live members plus every group admin of its group. Every
 desk check also asks whether the person still belongs to the group, through the same
 predicate sign-in uses: a scope grant or a live team membership. A member row on its own
 never grants anything, so a collector whose grant is revoked loses the desk the same
 instant. Milestone D, the desk-scoped inbox, must reuse that check
 through `CollectionDeskService.can_view`, never by reading the member table directly.
+Both `can_view` and `visible_desks` take the session's group as an argument.
 
 <Note>
 A desk never admits anyone to Spinal. Members are added by email, and the row links to a
@@ -183,16 +190,37 @@ the form.
 
 Three links sit under the desk in the app sidebar (since 1 October 2026, Linear milestone D).
 
-**Inbox** is the desk's shared mailbox, read as the desk: the customer-grouped inbox,
-limited to threads that are linked to a receivable in the desk's business units and
-that came through the desk's mailboxes (its inbound mailbox, or its sending address, so
-a chase sent from the desk and answered there stays with the desk). Everyone linked on
-the desk and every group admin reads it, whatever their own business-unit grants. That
-is the one place a person's view is wider than their grants, by decision: the inbox is
-bound to the desk, and being on the desk is the scope. The backend resolves `desk_id`
-into a desk scope in `api/dependencies/desk.py`; nothing else widens. Mail with no
-receivable link (most of a mailbox's traffic) is not in the desk inbox yet; a flat
-thread view is a later cut.
+**Inbox** is every email in the desk's mailbox, as one flat list of threads, newest
+first, the way Outlook shows a shared mailbox (spec
+`dashboard-backend/specs/october-2026/desk-inbox-every-email/spec.md`). A thread is in it
+when at least one of its emails is stamped to the desk (`emails.desk_id`): mail synced
+from the desk's inbound mailbox, and the desk's own sends. Everyone linked on the desk
+and every group admin reads it, whatever their own business-unit grants. That is the one
+place a person's view is wider than their grants, by decision: being on the desk is the
+scope. The backend resolves `desk_id` into a desk scope in `api/dependencies/desk.py`;
+nothing else widens.
+
+Matching a thread to a customer is a label, not a filter. A thread linked to an invoice,
+or stamped with a customer account by triage, shows the account name and its open
+balance. A thread with neither shows the sender. Both are listed, both open, and both can
+be replied to. System mail (Oracle statements, past-due letters, delivery reports) is
+listed like any other mail.
+
+Inside a thread, an email is shown when it is stamped to the desk or linked to an
+invoice in one of the desk's units (`email_visible_to_desk` in
+`services/email_visibility.py`). A colleague's personal Gmail or Outlook copy of the
+same conversation is not the desk's mail and is never shown.
+
+A reply always sends from the desk's chase channel, with `Reply-To` set to the inbound
+mailbox. The legal entity it is filed under is not a choice the user sees:
+`desk_acting_client` in `services/collection_desks/stamp.py` takes the entity of the
+thread's linked invoice in the desk's units, else the entity of the desk's first unit.
+
+The list is `GET /communications/threads?desk_id=` (`api/routers/communications/desk_list.py`).
+It pages by an opaque keyset cursor (`cursor`, `next_cursor`) on last activity and thread
+id, and computes the row details (label, snippet, issue type, draft flag, balance) for
+the page's threads only. `/threads/counts` and every single-thread endpoint use the same
+set of threads, so a desk can open exactly what its list shows.
 
 **My tasks** is the person's own work: issues assigned to them and decisions waiting
 on them. It is not desk-specific.
@@ -203,9 +231,9 @@ never widen). Until replies are auto-assigned to the person named earlier in the
 (milestone D's assignment work), that is almost every open issue on the desk's units.
 
 <Note>
-Opening a thread's context panel, resolving or assigning its issues and uploading
-attachments still run on the caller's own grants, so a member whose grants do not cover
-the thread's unit can read and reply on the desk inbox but sees those panels empty.
+Opening a thread's context panel and resolving or assigning its issues still run on the
+caller's own grants, so a member whose grants do not cover the thread's unit can read,
+reply and attach on the desk inbox but sees those panels empty.
 </Note>
 
 ## Chasing: segments
