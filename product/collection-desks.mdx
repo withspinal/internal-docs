@@ -79,12 +79,19 @@ outbound address, branding of the units their grants cover). The role is recorde
 milestone C, where managers approve agent actions. Creating a desk, deleting it, and
 moving it to another mailbox stay with the group admin.
 
+A desk belongs to one group and exists only for sessions signed into that group. The
+desk list, every desk page and link, and desk creation follow the group the person picked
+at sign-in (`scope.group_id` from `require_scope`), so an admin of two groups never sees,
+opens or builds one group's desk from a session in the other. A desk outside the
+signed-in group is a uniform 404; creating one there is a 403.
+
 Who sees a desk is the desk's live members plus every group admin of its group. Every
 desk check also asks whether the person still belongs to the group, through the same
 predicate sign-in uses: a scope grant or a live team membership. A member row on its own
 never grants anything, so a collector whose grant is revoked loses the desk the same
 instant. Milestone D, the desk-scoped inbox, must reuse that check
 through `CollectionDeskService.can_view`, never by reading the member table directly.
+Both `can_view` and `visible_desks` take the session's group as an argument.
 
 <Note>
 A desk never admits anyone to Spinal. Members are added by email, and the row links to a
@@ -127,10 +134,19 @@ back, with their sender settings reset, and walks on to the mailbox step so a di
 address can be added; that is the path for changing the desk's email. Removing one mailbox stops its sync after the current
 run and keeps its history; it can be added again and re-reads its history window.
 
-Two honest limits, until a scheduled sync exists: a mailbox pulls when it is added, when
+**A desk owns its mailbox** (since 1 October 2026). A shared mailbox is only read once it is
+some desk's inbound mailbox: adding it to Spinal probes it and stores it, nothing more; the
+first pull starts the moment a desk is created on it (or a desk's inbound mailbox is changed
+to it). A mailbox on no desk reads "Not on a desk yet" in the sync column, **Sync now** is
+disabled for it, and a kick that reaches it anyway (the domain-census confirm kicks every
+active mailbox) writes one "Sync skipped: not on a desk yet" line in its activity log and
+does nothing else. Every email the pull stores is stamped with the desk, and so is every
+issue the desk's outreach raises; that stamp is what the desk's inbox and tasks read.
+
+Two honest limits, until a scheduled sync exists: a mailbox pulls when it joins a desk, when
 **Sync now** is pressed and when the domain census is confirmed, so the sync column reads
 "Last full sync <when>" rather than a live cadence; and a mailbox added while Microsoft is
-still granting access says so and waits for **Sync now**.
+still granting access says so until a desk kicks its first pull.
 
 ## Email branding
 
@@ -181,60 +197,150 @@ the form.
 
 ## The desk's inbox and tasks
 
-Three links sit under the desk in the app sidebar (since 1 October 2026, Linear milestone D).
+Three links sit under the desk in the app sidebar (Linear milestone D; first cut 1 October
+2026, replaced the same day by the desk stamp).
 
-**Inbox** is the desk's shared mailbox, read as the desk: the customer-grouped inbox,
-limited to threads that are linked to a receivable in the desk's business units and
-that came through the desk's mailboxes (its inbound mailbox, or its sending address, so
-a chase sent from the desk and answered there stays with the desk). Everyone linked on
-the desk and every group admin reads it, whatever their own business-unit grants. That
-is the one place a person's view is wider than their grants, by decision: the inbox is
-bound to the desk, and being on the desk is the scope. The backend resolves `desk_id`
-into a desk scope in `api/dependencies/desk.py`; nothing else widens. Mail with no
-receivable link (most of a mailbox's traffic) is not in the desk inbox yet; a flat
-thread view is a later cut.
+**Inbox** is every email in the desk's mailbox, as one flat list of threads, newest
+first, the way Outlook shows a shared mailbox (spec
+`dashboard-backend/specs/october-2026/desk-inbox-every-email/spec.md`). A thread is in it
+when at least one of its emails is stamped to the desk (`emails.desk_id`): mail synced
+from the desk's inbound mailbox, and the desk's own sends. Everyone linked on the desk
+and every group admin reads it, whatever their own business-unit grants. That is the one
+place a person's view is wider than their grants, by decision: being on the desk is the
+scope. The backend resolves `desk_id` into a desk scope in `api/dependencies/desk.py`;
+nothing else widens.
 
-**My tasks** is the person's own work: issues assigned to them and decisions waiting
-on them. It is not desk-specific.
+A thread is every email that shares an `emails.thread_id`. There is no thread table.
+`ThreadService.assign_thread` (`services/thread_service.py`) sets the id once, when the
+email is stored, on every path that stores one: shared-mailbox, Outlook and Gmail sync,
+the store-email workflow, and our own sends. It tries four rules in order and takes the
+first that matches:
 
-**Desk tasks** is the unassigned work on the desk: open issues on the desk's business
-units with nobody assigned, still only as far as the caller's own grants reach (issues
-never widen). Until replies are auto-assigned to the person named earlier in the thread
-(milestone D's assignment work), that is almost every open issue on the desk's units.
+1. `In-Reply-To`: find the parent by its Message-ID and take the parent's thread.
+2. `References`: walk the chain from newest to oldest and take the first thread we hold.
+3. Provider thread: take the thread of another email with the same Outlook conversation
+   id or Gmail thread id.
+4. Otherwise, start a new thread.
+
+Invoices play no part in this. `invoice_communications` links an email to the
+receivables it is about. It never decides which thread the email joins. The inbox used
+to be grouped by customer and showed only invoice-linked threads, so it looked
+invoice-shaped, but the threads under it were these same header-built threads. One
+consequence: a customer who writes a fresh email instead of replying, or whose mail
+client strips the reply headers, starts a new thread, and the list shows a second row
+for them.
+
+Matching a thread to a customer is a label, not a filter. A thread linked to an invoice,
+or stamped with a customer account by triage, shows the account name and its open
+balance. A thread with neither shows the sender. Both are listed, both open, and both can
+be replied to. System mail (Oracle statements, past-due letters, delivery reports) is
+listed like any other mail.
+
+Inside a thread, an email is shown when it is stamped to the desk or linked to an
+invoice in one of the desk's units (`email_visible_to_desk` in
+`services/email_visibility.py`). A colleague's personal Gmail or Outlook copy of the
+same conversation is not the desk's mail and is never shown.
+
+A reply always sends from the desk's chase channel, with `Reply-To` set to the inbound
+mailbox. The legal entity it is filed under is not a choice the user sees:
+`desk_acting_client` in `services/collection_desks/stamp.py` takes the entity of the
+thread's linked invoice in the desk's units, else the entity of the desk's first unit.
+
+The list is `GET /communications/threads?desk_id=` (`api/routers/communications/desk_list.py`).
+It pages by an opaque keyset cursor (`cursor`, `next_cursor`) on last activity and thread
+id, and computes the row details (label, snippet, issue type, draft flag, balance) for
+the page's threads only. `/threads/counts` and every single-thread endpoint use the same
+set of threads, so a desk can open exactly what its list shows.
+
+A reply from the desk inbox sends from the desk's one sending address, the chase channel
+chosen in desk settings. There is no sender to pick: not a personal mailbox, not the
+group's Postmark default. A desk with no chase channel cannot reply, and the composer
+says so and links to desk settings. Every email the desk sends, reply or chase, carries
+`Reply-To` of the desk's inbound mailbox, because only a desk's inbound mailbox is ever
+synced; without it a customer's answer to the chase address would never arrive.
+
+**My tasks** is the person's own work across desks: issues assigned to them and decisions
+waiting on them. Opening a row opens the conversation in the desk that holds it
+(`issues.desk_id`, stamped at creation from the source email, else the thread, else the
+unit), which also switches the current desk in the sidebar.
+
+**Desk tasks** is the unassigned work on the desk: open issues stamped to the desk with
+nobody assigned, for every linked member and group admin (membership is the scope here
+too). Issues without a thread (missing billing email, undeliverable, outreach approval)
+carry the unit's desk and open their resolution modal. Until replies are auto-assigned to
+the person named earlier in the thread (milestone D's assignment work), that is almost
+every open issue on the desk.
 
 <Note>
-Opening a thread's context panel, resolving or assigning its issues and uploading
-attachments still run on the caller's own grants, so a member whose grants do not cover
-the thread's unit can read and reply on the desk inbox but sees those panels empty.
+Opening a thread's context panel and resolving or assigning its issues still run on the
+caller's own grants, so a member whose grants do not cover the thread's unit can read,
+reply and attach on the desk inbox but sees those panels empty.
 </Note>
 
 ## Chasing: segments
 
 Since 1 October 2026 (Linear milestone E, spec `dashboard-backend/specs/october-2026/chasing-segments/spec.md`)
 a desk chases through **segments**, and the campaign object is gone from the product. Read this
-before touching the planner, the campaign tables or the Chasing page.
+before touching the planner, the campaign tables or the Chasing page. Audiences by class or by
+name, matching in the request and the recipient rule came on 2 October 2026 (Linear milestone B,
+spec `specs/october-2026/desk-audiences-and-site-use-recipients/spec.md`).
 
 **The book.** A desk chases every customer account with an open, collections-eligible invoice
 installment in one of its units. That set is the book; the Chasing page's coverage line is
 "chased accounts over the book". Nobody picks accounts.
 
-**Segments.** An ordered list per desk. Each segment is a rule over accounts (customer class,
-open balance over an amount in a named currency, days overdue, payment plan in arrears, credit
-hold; several predicates AND together, another segment is the OR) and a chase mode: a dunning
-ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account).
-Accounts match top to bottom and the first match wins; "Everyone else" is the catch-all and is
-always last. Every desk is born with its catch-all, draft and manual, so a new desk chases
-nobody until someone activates a ladder. A draft segment is not matched; it only shows how
-many accounts it would take.
+**Segments.** An ordered list per desk. Each segment is an audience and a chase mode: a dunning
+ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account). You
+pick the audience first, then how it is chased. Accounts match top to bottom and the first match
+wins. "Everyone else" is the catch-all and is always last. Every desk is born with its catch-all,
+draft and manual, so a new desk chases nobody until someone activates a ladder.
 
-**Matching is materialised.** The hourly planner sweep walks the book through the live
-segments and writes one row per account into `collection_desk_segment_accounts`, which is
-UNIQUE on (desk, account): one segment per account per desk, enforced by the database. A
-changed match is a move: the old segment's planned reminders (the consolidated email included)
-end with reason `moved`, never a user cancel, and the new segment plans in the same sweep.
-Reordering is the only way two segments can want one account, and the sweep settles it. An
-account a person excludes ("Stop chasing on this desk" on the account card) is never matched
-again until the exclusion is lifted.
+**Audiences.** An audience is a rule over accounts. The page offers two kinds today: customer
+class is one of a list, or a hand-picked list of customers found by name (up to 1,000). The
+backend also evaluates open balance over an amount in a named currency, days overdue, payment
+plan in arrears and credit hold. Those four are built and tested but not offered on the page yet.
+Several predicates in one rule AND together, and another segment is the OR. A customer picked
+into two segments goes to the higher one. A hand-picked customer who owes nothing stays in the
+rule and is matched when an invoice appears.
+
+The picker reads the desk's customers: every account with a site use or an invoice in one of the
+desk's units, from `GET /collection-desks/<desk_id>/chasing/customers`. The classes come from
+`GET /collection-desks/<desk_id>/chasing/customer-classes`. Both go through
+`customer_accounts_in_scope` under the desk's scope. Do not write a second definition of which
+customers a desk has.
+
+**Matching is materialised.** `match_desk` walks the book through the live segments and writes
+one row per account into `collection_desk_segment_accounts`, which is UNIQUE on (desk, account):
+one segment per account per desk, enforced by the database. It runs in three places. It runs in
+the request after every write that changes who a segment holds: activate, a rule edit on a live
+or paused segment, reorder, delete, lifting an exclusion, and a change to the desk's units (for
+the desk and for each desk a unit left). It runs after each ERP load, which is how a customer
+newly synced from Oracle reaches its segment. It runs in the hourly planner sweep, which catches
+everything else. If a match raises inside a request, the write is kept, the error is logged and
+the sweep retries.
+
+A draft segment is not matched, because a draft that held accounts would pull them out of the
+live segments below it. Its accounts list shows the customers it would take if you activated it
+where it sits, so a new segment shows its customers as soon as it is saved.
+
+A changed match is a move: the old segment's planned reminders (the consolidated email included)
+end with reason `moved`, never a user cancel, and the new segment plans straight away.
+Reordering is the only way two segments can want one account. An account a person excludes
+("Stop chasing on this desk" on the account card) is never matched again until the exclusion is
+lifted.
+
+**Who gets the email.** `DunningContactResolver` picks one recipient per account and unit, in
+this order. First, a contact tagged DUNNING on a site with a DUNNING site use for the unit.
+Second, a contact tagged DUNNING on the account. Third, any contact on a site that has a BILL_TO
+site use for the unit. Oracle's extract tags no contact as DUNNING and sends no DUNNING site
+uses, so for an Oracle-fed group the third rank is the one that resolves. That is what "contacts
+derive from the bill-to site use" means in code. The third rank only returns a contact with an
+email address who is not flagged do-not-contact or do-not-email, and it applies to email only.
+
+When a bill-to site has several contacts, the pick is stable but not meaningful. The order is
+the unit's own site use, then the primary site use, then the oldest assignment, and on Oracle
+data the last step is the order of the extract. Fusion's primary flag on the contact role is not
+kept. Correct a wrong recipient on the reminder itself. Do not add a second resolver.
 
 **Not chased** has one meaning: accounts no active segment reaches, accounts an active ladder
 holds but nobody can be emailed for in any desk unit, accounts under a paused segment, excluded
@@ -289,5 +395,8 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
+| Desk stamp, sync gate, inbox and tasks on the stamp | `dashboard-backend/specs/october-2026/desk-owns-the-mailbox/spec.md` (supersedes `desk-inbox-and-tasks`); derivation in `services/collection_desks/stamp.py` |
+| Audiences by class or by name, matching in the request, the recipient rule | `dashboard-backend/src/services/dunning_contact_resolver.py` and the files above; spec `specs/october-2026/desk-audiences-and-site-use-recipients/spec.md` |
+| Thread assignment (which thread an email joins) | `dashboard-backend/src/services/thread_service.py` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
