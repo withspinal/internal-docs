@@ -210,6 +210,26 @@ place a person's view is wider than their grants, by decision: being on the desk
 scope. The backend resolves `desk_id` into a desk scope in `api/dependencies/desk.py`;
 nothing else widens.
 
+A thread is every email that shares an `emails.thread_id`. There is no thread table.
+`ThreadService.assign_thread` (`services/thread_service.py`) sets the id once, when the
+email is stored, on every path that stores one: shared-mailbox, Outlook and Gmail sync,
+the store-email workflow, and our own sends. It tries four rules in order and takes the
+first that matches:
+
+1. `In-Reply-To`: find the parent by its Message-ID and take the parent's thread.
+2. `References`: walk the chain from newest to oldest and take the first thread we hold.
+3. Provider thread: take the thread of another email with the same Outlook conversation
+   id or Gmail thread id.
+4. Otherwise, start a new thread.
+
+Invoices play no part in this. `invoice_communications` links an email to the
+receivables it is about. It never decides which thread the email joins. The inbox used
+to be grouped by customer and showed only invoice-linked threads, so it looked
+invoice-shaped, but the threads under it were these same header-built threads. One
+consequence: a customer who writes a fresh email instead of replying, or whose mail
+client strips the reply headers, starts a new thread, and the list shows a second row
+for them.
+
 Matching a thread to a customer is a label, not a filter. A thread linked to an invoice,
 or stamped with a customer account by triage, shows the account name and its open
 balance. A thread with neither shows the sender. Both are listed, both open, and both can
@@ -377,5 +397,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
 | Desk stamp, sync gate, inbox and tasks on the stamp | `dashboard-backend/specs/october-2026/desk-owns-the-mailbox/spec.md` (supersedes `desk-inbox-and-tasks`); derivation in `services/collection_desks/stamp.py` |
 | Audiences by class or by name, matching in the request, the recipient rule | `dashboard-backend/src/services/dunning_contact_resolver.py` and the files above; spec `specs/october-2026/desk-audiences-and-site-use-recipients/spec.md` |
+| Thread assignment (which thread an email joins) | `dashboard-backend/src/services/thread_service.py` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
