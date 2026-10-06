@@ -220,12 +220,21 @@ installment in one of its units. That set is the book; the Chasing page's covera
 
 **Segments.** An ordered list per desk. Each segment is a rule over accounts (customer class,
 open balance over an amount in a named currency, days overdue, payment plan in arrears, credit
-hold; several predicates AND together, another segment is the OR) and a chase mode: a dunning
-ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account).
-Accounts match top to bottom and the first match wins; "Everyone else" is the catch-all and is
-always last. Every desk is born with its catch-all, draft and manual, so a new desk chases
-nobody until someone activates a ladder. A draft segment is not matched; it only shows how
-many accounts it would take.
+hold, hand-picked customers; several predicates AND together, another segment is the OR) and a
+chase mode: a dunning ladder, an AI agent, or manual (the collector on the account). Accounts
+match top to bottom and the first match wins. A desk is born with no segments, so it chases
+nobody until someone activates one. A draft segment is not matched; it only shows how many
+accounts it would take. Reorder segments by dragging their rows on the Chasing page.
+
+**The default segment.** A person picks one live segment per desk as its default ("Make
+default" in the row menu). It keeps its own rule and also takes every book account that no
+segment's rule matches, after every rule has had its turn, wherever it sits in the order. That
+is how a new customer gets chased without a rule written for it. Without a default those
+accounts land nowhere and show as "not in a segment". The rows the default holds only as
+leftovers carry `via_default`, so the hand-picked account picker still lists them as
+unassigned. Deleting a segment, or narrowing its rule, moves its accounts into the default in
+the same request. A draft cannot be the default. The spec is
+`dashboard-backend/specs/october-2026/desk-default-segment/spec.md`.
 
 **Matching is materialised.** The hourly planner sweep walks the book through the live
 segments and writes one row per account into `collection_desk_segment_accounts`, which is
