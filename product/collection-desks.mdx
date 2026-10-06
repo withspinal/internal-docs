@@ -122,7 +122,7 @@ permission; `Mail.ReadWrite` does not send.
 **Manage** on the app row shows its ids, lets an admin update the secret, re-check the
 permissions Microsoft reports, or disconnect the app. Disconnecting is typed-to-confirm and
 says what it breaks: which mailboxes stop syncing, which desks are built on them, and which
-campaigns send from them. Reconnecting the same app (same client id) brings its mailboxes
+desks send from them. Reconnecting the same app (same client id) brings its mailboxes
 back, with their sender settings reset, and walks on to the mailbox step so a different
 address can be added; that is the path for changing the desk's email. Removing one mailbox stops its sync after the current
 run and keeps its history; it can be added again and re-reads its history window.
@@ -251,6 +251,16 @@ invoice from the email; a do-not-contact window in any desk unit holds the whole
 engine row is not a campaign to any API: the campaign endpoints cannot see it, and membership,
 update and ladder edits refuse it. A campaign that still exists never plans on a unit that is on
 a desk.
+
+**A desk is mandatory** (6 October 2026, spec
+`dashboard-backend/specs/october-2026/desk-mandatory-retire-campaigns/spec.md`). No unit is
+chased except through a desk's segments: a unit on no desk sends nothing until it is put on one.
+Migration `b4e7d2a9c1f3` retired every campaign that was not an engine (status DELETED, its live
+reminders cancelled), and the campaign pages and builder are gone from the frontend. The engine
+rows stay: they are still how a segment sends. The `spine_campaigns` and `campaign_memberships`
+routes still exist and the planner still plans a non-engine campaign on a unit with no desk, so
+a campaign made through those routes directly would send; nothing in the product creates one.
+Both go together with the planner tests that still use a non-engine fixture.
 
 **Schedule and sender.** The desk carries sending days and a local send time; saving them is
 written into every engine and every ladder step, so the ladder's own times never apply. The
