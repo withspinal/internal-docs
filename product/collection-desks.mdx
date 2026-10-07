@@ -12,9 +12,9 @@ what has to exist before a group can create one.
 
 ## What a desk is
 
-A desk is one shared inbound mailbox with a team, a set of business units, and the
-addresses the team sends from. Customers write to the mailbox and collectors copy it, so
-the mailbox is the desk's identity and its thread of record. A customer who owes several
+A desk is one or more shared inbound mailboxes with a team, a set of business units, and
+the addresses the team sends from. Customers write to the mailboxes and collectors copy
+them, so the mailboxes are the desk's identity and its thread of record. A customer who owes several
 business units on one desk is chased once, with one total itemised per unit. That roll-up
 is the point of the desk: without it, a customer hears from Spinal once per business unit.
 
@@ -28,7 +28,7 @@ scope.
 | Part | What it is | Where it comes from |
 |------|------------|---------------------|
 | Name | Shown to the team in the desk switcher. Customers never see it. | Typed once. Unique per group, case-insensitive. |
-| Inbound mailbox | The shared mailbox the desk reads. Its identity and thread of record. | A connected shared mailbox, read through the group's Entra app. |
+| Inbound mailboxes | The shared mailboxes the desk reads. Mail to any of them lands in the desk's inbox. The first one added is the reply-to mailbox. | Connected shared mailboxes, read through the group's Entra app. A mailbox is on one desk at most. |
 | Business units | The desk's book: the units it chases as one. | Ticked from the group's business units. A unit is on one desk at most. |
 | Members | The people who can see the desk's inbox, each as a manager or a member. | Added by email. A row links to a user when that person is already admitted to the group. |
 | Outbound channel | The address the desk sends from. | Picked from the group's send-enabled mailboxes only. One per desk for now: it is what agents send through. |
@@ -39,23 +39,40 @@ derive from the bill-to site uses in the desk's business units on the next ERP s
 Agents are a later milestone of the same Linear project, "Collection desks"; segments and
 the desk-scoped inbox are below. Phone numbers are not a channel yet.
 
-A desk is created complete: name, inbound mailbox, outbound address, at least one
+A desk is created complete: name, at least one inbound mailbox, outbound address, at least one
 business unit and at least one member, in one call. It stays complete afterwards: the
-last member cannot be removed and the outbound address cannot be cleared, only changed.
+last member and the last inbound mailbox cannot be removed, and the outbound address cannot
+be cleared, only changed.
 
 ## Two rules the database enforces
 
 Both were decided on 29 September 2026 and both are constraints, not conventions. Do not
 relax them in application code and do not add a second path around them.
 
-- **A desk and its inbound mailbox are one to one.** `collection_desks.inbound_shared_mailbox_connection_id`
-  is NOT NULL and UNIQUE. A second desk on the same mailbox gets a 409 that names the desk
-  already holding it, even when two admins race for it.
+- **A mailbox is on at most one desk.** `collection_desk_inbound_mailboxes` is UNIQUE on
+  `shared_mailbox_connection_id` alone, so a desk can read several mailboxes but a mailbox
+  belongs to one desk. Adding a mailbox another desk holds gets a 409 that names that desk,
+  even when two admins race for it. `collection_desks.inbound_shared_mailbox_connection_id`
+  is now the reply-to mailbox, and a foreign key ties it to one of the desk's own link rows.
 - **A business unit is on at most one desk.** `collection_desk_business_units` is UNIQUE on
   `business_unit_id` alone, not per desk. Ticking a unit that another desk holds gets a
   409 that names that desk.
 
 A desk also needs at least one business unit, on create and on every later edit.
+
+### Adding and removing inbound mailboxes
+
+A group admin manages a desk's mailboxes on its **Inbound** settings page
+(spec `dashboard-backend/specs/october-2026/desk-multiple-inbound-mailboxes/spec.md`).
+Adding a mailbox asks how much history to import and starts its first sync. That is the
+only place the history window is chosen; connecting a mailbox on Mailboxes & numbers does
+not ask. If the mailbox was on another desk before, the mail it brought there moves to the
+new desk with it.
+
+Removing a mailbox stops its sync after the current run. The conversations it already
+brought in stay on the desk. The desk's last mailbox cannot be removed. Replies go to the
+reply-to mailbox, which is the first one added; if you remove it, the next-oldest mailbox
+becomes the reply-to. Nobody picks the reply-to by hand.
 
 ### Moving a unit to another desk
 
@@ -104,11 +121,11 @@ place on the page and a "Coming soon" badge; nothing is built for them.
 
 **Add connection** is one dialog with steps: choose the provider (only Microsoft Entra is
 live), paste the app's tenant id, client id and client secret (checked with Microsoft before
-anything is saved), then add the shared mailbox with how much history to import. The
+anything is saved), then add the shared mailbox. The
 "Mailbox added" summary says, on the server's terms, what the mailbox can do: it reads; it
 can send once a desk uses it as its sending address, or it cannot send yet and there is a
-"Copy request for IT" for the `Mail.Send` grant; and how the import is going. "Create a desk
-with it" opens New desk with that mailbox preselected.
+"Copy request for IT" for the `Mail.Send` grant; and that it starts reading once it is on a
+desk. "Create a desk" opens New desk, where nothing is preselected.
 
 **Sending** has two halves, and the second one is easy to miss. The Entra app must hold
 `Mail.Send`, and each mailbox must be declared an outreach sender, because Microsoft cannot
@@ -124,8 +141,8 @@ permissions Microsoft reports, or disconnect the app. Disconnecting is typed-to-
 says what it breaks: which mailboxes stop syncing, which desks are built on them, and which
 campaigns send from them. Reconnecting the same app (same client id) brings its mailboxes
 back, with their sender settings reset, and walks on to the mailbox step so a different
-address can be added; that is the path for changing the desk's email. Removing one mailbox stops its sync after the current
-run and keeps its history; it can be added again and re-reads its history window.
+address can be added. Removing one mailbox stops its sync after the current run and keeps
+its history; it can be added again and re-reads its history window.
 
 Two honest limits, until a scheduled sync exists: a mailbox pulls when it is added, when
 **Sync now** is pressed and when the domain census is confirmed, so the sync column reads
@@ -170,9 +187,9 @@ readiness card until it can (Figma 5270:1693):
   </Step>
   <Step title="Desk details">
     **Set up desk** unlocks when both rows are ready and opens the form: name, inbound
-    mailbox, sending address, business units and members, all compulsory. When there is one
-    free mailbox it is preselected, and it is preselected as the sender when it can send. A
-    group with one business unit skips the unit picker.
+    mailboxes, sending address, business units and members, all compulsory. Nothing is
+    preselected. **Add mailbox** picks one or more free mailboxes and how much history each
+    imports. A group with one business unit skips the unit picker.
   </Step>
 </Steps>
 
@@ -185,7 +202,7 @@ Three links sit under the desk in the app sidebar (since 1 October 2026, Linear 
 
 **Inbox** is the desk's shared mailbox, read as the desk: the customer-grouped inbox,
 limited to threads that are linked to a receivable in the desk's business units and
-that came through the desk's mailboxes (its inbound mailbox, or its sending address, so
+that came through the desk's mailboxes (any of its inbound mailboxes, or its sending address, so
 a chase sent from the desk and answered there stays with the desk). Everyone linked on
 the desk and every group admin reads it, whatever their own business-unit grants. That
 is the one place a person's view is wider than their grants, by decision: the inbox is
@@ -289,5 +306,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
+| Multiple inbound mailboxes: link table, add and remove, reply-to | `CollectionDeskService.add_inbound_mailboxes` and `remove_inbound_mailbox`; spec `specs/october-2026/desk-multiple-inbound-mailboxes/spec.md` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
