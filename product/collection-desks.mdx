@@ -28,10 +28,10 @@ scope.
 | Part | What it is | Where it comes from |
 |------|------------|---------------------|
 | Name | Shown to the team in the desk switcher. Customers never see it. | Typed once. Unique per group, case-insensitive. |
-| Inbound mailboxes | The shared mailboxes the desk reads. Mail to any of them lands in the desk's inbox. The first one added is the reply-to mailbox. | Connected shared mailboxes, read through the group's Entra app. A mailbox is on one desk at most. |
+| Inbound mailboxes | The shared mailboxes the desk reads. Mail to any of them lands in the desk's inbox. | Connected shared mailboxes, read through the group's Entra app. A mailbox is on one desk at most. |
 | Business units | The desk's book: the units it chases as one. | Ticked from the group's business units. A unit is on one desk at most. |
 | Members | The people who can see the desk's inbox, each as a manager or a member. | Added by email. A row links to a user when that person is already admitted to the group. |
-| Outbound channel | The address the desk sends from. | Picked from the group's send-enabled mailboxes only. One per desk for now: it is what agents send through. |
+| Outbound channel | The address the desk sends from. Customers reply to it, so the desk also reads it. | Picked from the group's send-enabled mailboxes only. Choosing one adds it to the desk's inbound mailboxes. One per desk for now: it is what agents send through. |
 | Email branding | The header and footer letterhead on the desk's emails. | Set per business unit on the desk's Email branding page. |
 
 Accounts, collectors and contacts are not on the list because nobody picks them. They
@@ -53,7 +53,8 @@ relax them in application code and do not add a second path around them.
   `shared_mailbox_connection_id` alone, so a desk can read several mailboxes but a mailbox
   belongs to one desk. Adding a mailbox another desk holds gets a 409 that names that desk,
   even when two admins race for it. `collection_desks.inbound_shared_mailbox_connection_id`
-  is now the reply-to mailbox, and a foreign key ties it to one of the desk's own link rows.
+  holds the first mailbox added, and a foreign key ties it to one of the desk's own link rows. It
+  no longer decides where replies go.
 - **A business unit is on at most one desk.** `collection_desk_business_units` is UNIQUE on
   `business_unit_id` alone, not per desk. Ticking a unit that another desk holds gets a
   409 that names that desk.
@@ -70,9 +71,25 @@ not ask. If the mailbox was on another desk before, the mail it brought there mo
 new desk with it.
 
 Removing a mailbox stops its sync after the current run. The conversations it already
-brought in stay on the desk. The desk's last mailbox cannot be removed. Replies go to the
-reply-to mailbox, which is the first one added; if you remove it, the next-oldest mailbox
-becomes the reply-to. Nobody picks the reply-to by hand.
+brought in stay on the desk. The desk's last mailbox cannot be removed, and neither can the
+mailbox the desk sends from.
+
+### Where customers' replies go
+
+Every email the desk sends sets Reply-To to the address it was sent from, so a customer
+answers whoever wrote to them. Say Oracle sends an invoice from `billing@`, which is one of
+the desk's inbound mailboxes, and the desk sends from `ar@`. The customer's first reply goes
+to `billing@`. Once the desk answers from `ar@`, the customer's next reply goes to `ar@`.
+
+That is why the desk always reads its outbound address. When a group admin picks an outbound
+address the desk does not read yet, it joins the inbound mailboxes and starts syncing. A desk
+member who is not a group admin can only pick an address the desk already reads, because
+adding an inbound mailbox brings that mailbox's mail onto the desk. Two desks cannot send from
+the same mailbox, since a mailbox is on one desk.
+
+Spinal puts both halves into one thread in the desk inbox, because each reply carries the
+message ID of the email it answers. In Outlook each mailbox only shows its own half: in the
+example, `billing@` has nothing after the customer's first reply.
 
 ### Moving a unit to another desk
 
@@ -306,6 +323,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
-| Multiple inbound mailboxes: link table, add and remove, reply-to | `CollectionDeskService.add_inbound_mailboxes` and `remove_inbound_mailbox`; spec `specs/october-2026/desk-multiple-inbound-mailboxes/spec.md` |
+| Multiple inbound mailboxes: link table, add and remove, the outbound address joins inbound | `CollectionDeskService.add_inbound_mailboxes` and `remove_inbound_mailbox`; spec `specs/october-2026/desk-multiple-inbound-mailboxes/spec.md` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
