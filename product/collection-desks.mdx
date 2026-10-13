@@ -218,12 +218,18 @@ before touching the planner, the campaign tables or the Chasing page.
 installment in one of its units. That set is the book; the Chasing page's coverage line is
 "chased accounts over the book". Nobody picks accounts.
 
-**Segments.** An ordered list per desk. Each segment is a rule over accounts (customer class,
+**Segments.** Each desk has a set of segments. Each segment is a rule over accounts (customer class,
 open balance over an amount in a named currency, days overdue, payment plan in arrears, credit
 hold; several predicates AND together, another segment is the OR) and a chase mode: a dunning
 ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account).
-Accounts match top to bottom and the first match wins; "Everyone else" is the catch-all and is
-always last. Every desk is born with its catch-all, draft and manual, so a new desk chases
+In the product today every segment is a hand-picked list of accounts, and a list keeps its
+accounts. Going live takes only the accounts no other live segment holds, so activating a
+segment never pulls an account off another live one. A draft's picks move nothing. The only
+way to move an account between live segments is to pick it in Edit audience on the segment
+that should have it. The default segment holds every account no list holds, and those
+leftovers are free for any segment to take. Rule matching by class, balance or days overdue
+is still in the code, but nothing in the product creates a rule segment. "Everyone else" is
+the catch-all. Every desk is born with its catch-all, draft and manual, so a new desk chases
 nobody until someone activates a ladder. A draft segment is not matched; it only shows how
 many accounts it would take.
 
@@ -232,7 +238,7 @@ segments and writes one row per account into `collection_desk_segment_accounts`,
 UNIQUE on (desk, account): one segment per account per desk, enforced by the database. A
 changed match is a move: the old segment's planned reminders (the consolidated email included)
 end with reason `moved`, never a user cancel, and the new segment plans in the same sweep.
-Reordering is the only way two segments can want one account, and the sweep settles it. An
+Lists never overlap, so no two live segments want the same account. An
 account a person excludes ("Stop chasing on this desk" on the account card) is never matched
 again until the exclusion is lifted.
 
@@ -268,6 +274,16 @@ and pauses segments and sets the schedule, channel and letterhead. Reads are des
 **Not in this cut.** The agent mode's execution, approvals and SOPs (milestone C); "Collected,
 30d" and "Replied, 30d"; holidays and preview-before-send; shared ladders across desks; tags on
 accounts; statements instead of the per-unit sheet; deleting the campaign tables.
+
+**The account card lists units, not one desk.** On a customer account's Outreach tab, the
+chasing card has one row per business unit the account has a balance in (credits count; a
+settled unit drops off). Each unit can sit on its own desk with its own segment, so each row
+names its desk and segment, the address it sends as, who it is sent to, the next outreach and
+that unit's balance in its ledger currency. A pill says why a unit's chase is held: paused, a
+draft, nobody to email, the contact away, or stopped on the desk. The View by lens narrows the
+rows, and clicking a row narrows the lens so the calendar follows. On a desk the viewer is not
+on, the row shows only the unit, the recipient and the balance. Stopping is desk-wide, so the
+confirmation names every unit of that desk it stops.
 
 ## Why a desk is not a team
 
