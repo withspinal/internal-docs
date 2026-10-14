@@ -231,9 +231,12 @@ Lists never overlap. Picking an account onto a live segment in Edit audience tak
 other list on the desk. Going live takes only the picks no other live segment holds, so
 activating a segment never pulls an account off another one.
 
-**The default segment** is the one segment a data sync adds to. After each AD Ports load, every
-book account that no segment holds and nobody took off a segment by hand joins the desk's live
-default. Those accounts are stored as `via_default` rows in `collection_desk_segment_accounts`,
+**The default segment** is the one segment a data sync adds to, and it only ever takes new
+customers. A desk remembers every account it has seen: on its book at a sync, or held or stopped
+on one of its segments (`collection_desk_known_accounts`). After each AD Ports load, the book
+accounts the desk has never seen join its live default. An account someone kept off a segment
+(unpicked, stopped, or on a deleted segment) is known, so it never comes back on its own. A new
+desk knows nobody, so its first sync brings its whole book. Those accounts are stored as `via_default` rows in `collection_desk_segment_accounts`,
 not as ids in the default's rule, because a book runs to thousands. Nothing joins the default
 on a timer or on a click. Making a different segment the default moves the enrolled accounts
 with the flag. With no live default, a synced account is on no segment and not chased.
@@ -249,8 +252,8 @@ user cancel. Deleting a segment leaves its accounts on no segment.
 
 **Stop chasing** takes the account off the segment that holds it on that desk. Its pick comes
 off the list, its planned reminders on that segment end with reason `excluded`, and a row in
-`collection_desk_account_exclusions` records who did it, when, and which segment. That row stops
-the next data sync from putting the account on the default. Other segments and other desks are
+`collection_desk_account_exclusions` records who did it, when, and which segment. The account is
+already known to the desk, so no data sync puts it on the default. Other segments and other desks are
 not touched. Unpicking an account in Edit audience writes the same record. **Chase again** puts
 the account back on the recorded segment if it still exists and is not a draft. Picking the
 account onto any list deletes the record.
