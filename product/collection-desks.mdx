@@ -218,33 +218,46 @@ before touching the planner, the campaign tables or the Chasing page.
 installment in one of its units. That set is the book; the Chasing page's coverage line is
 "chased accounts over the book". Nobody picks accounts.
 
-**Segments.** Each desk has a set of segments. Each segment is a rule over accounts (customer class,
-open balance over an amount in a named currency, days overdue, payment plan in arrears, credit
-hold; several predicates AND together, another segment is the OR) and a chase mode: a dunning
-ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account).
-In the product today every segment is a hand-picked list of accounts, and a list keeps its
-accounts. Going live takes only the accounts no other live segment holds, so activating a
-segment never pulls an account off another live one. A draft's picks move nothing. The only
-way to move an account between live segments is to pick it in Edit audience on the segment
-that should have it. The default segment holds every account no list holds, and those
-leftovers are free for any segment to take. Rule matching by class, balance or days overdue
-is still in the code, but nothing in the product creates a rule segment. "Everyone else" is
-the catch-all. Every desk is born with its catch-all, draft and manual, so a new desk chases
-nobody until someone activates a ladder. A draft segment is not matched; it only shows how
-many accounts it would take.
+**Segments.** Each desk has a set of segments. A segment is a list of customer accounts
+picked by name, plus a chase mode: a dunning ladder, an AI agent, or manual (the collector on
+the account). Since 14 October 2026 (spec
+`dashboard-backend/specs/october-2026/segments-are-lists/spec.md`) the list is the membership.
+An account on a live or paused segment's list is held by it, whether it owes anything or not.
+A draft holds nobody. The API refuses a segment whose rule is anything other than one list, and
+the migration turned the old rule segments (by class, balance, days overdue) into lists of who
+they held.
 
-**Matching is materialised.** The hourly planner sweep walks the book through the live
-segments and writes one row per account into `collection_desk_segment_accounts`, which is
-UNIQUE on (desk, account): one segment per account per desk, enforced by the database. A
-changed match is a move: the old segment's planned reminders (the consolidated email included)
-end with reason `moved`, never a user cancel, and the new segment plans in the same sweep.
-Lists never overlap, so no two live segments want the same account. An
-account a person excludes ("Stop chasing on this desk" on the account card) is never matched
-again until the exclusion is lifted.
+Lists never overlap. Picking an account onto a live segment in Edit audience takes it off every
+other list on the desk. Going live takes only the picks no other live segment holds, so
+activating a segment never pulls an account off another one.
 
-**Not chased** has one meaning: accounts no active segment reaches, accounts an active ladder
-holds but nobody can be emailed for in any desk unit, accounts under a paused segment, excluded
-accounts, and manual-segment accounts with no collector. A disputed invoice is not "not chased":
+**The default segment** is the one segment a data sync adds to. After each AD Ports load, every
+book account that no segment holds and nobody took off a segment by hand joins the desk's live
+default. Those accounts are stored as `via_default` rows in `collection_desk_segment_accounts`,
+not as ids in the default's rule, because a book runs to thousands. Nothing joins the default
+on a timer or on a click. Making a different segment the default moves the enrolled accounts
+with the flag. With no live default, a synced account is on no segment and not chased.
+
+**When membership changes.** `match_desk` in
+`dashboard-backend/src/services/collection_desks/matching.py` is the only writer of
+`collection_desk_segment_accounts`. It runs in the request after a segment write (create, edit
+the list, activate, pause, delete, make default, stop, chase again, change the desk's units) and
+in the planner run that the AD Ports load starts with `enroll=True`. The hourly planner run only
+plans reminders. It never changes who a segment holds. A changed holder is a move: the old
+segment's planned reminders (the consolidated email included) end with reason `moved`, never a
+user cancel. Deleting a segment leaves its accounts on no segment.
+
+**Stop chasing** takes the account off the segment that holds it on that desk. Its pick comes
+off the list, its planned reminders on that segment end with reason `excluded`, and a row in
+`collection_desk_account_exclusions` records who did it, when, and which segment. That row stops
+the next data sync from putting the account on the default. Other segments and other desks are
+not touched. Unpicking an account in Edit audience writes the same record. **Chase again** puts
+the account back on the recorded segment if it still exists and is not a draft. Picking the
+account onto any list deletes the record.
+
+**Not chased** has one meaning: book accounts no active segment holds, accounts an active ladder
+holds but nobody can be emailed for in any desk unit, accounts under a paused segment, accounts
+taken off their segment by hand, and manual-segment accounts with no collector. A disputed invoice is not "not chased":
 it is held at send time and shown on the segment page.
 
 **One chase per desk and account, across units and legal entities.** A ladder segment is run by
@@ -275,15 +288,16 @@ and pauses segments and sets the schedule, channel and letterhead. Reads are des
 30d" and "Replied, 30d"; holidays and preview-before-send; shared ladders across desks; tags on
 accounts; statements instead of the per-unit sheet; deleting the campaign tables.
 
-**The account card lists units, not one desk.** On a customer account's Outreach tab, the
-chasing card has one row per business unit the account has a balance in (credits count; a
-settled unit drops off). Each unit can sit on its own desk with its own segment, so each row
-names its desk and segment, the address it sends as, who it is sent to, the next outreach and
-that unit's balance in its ledger currency. A pill says why a unit's chase is held: paused, a
-draft, nobody to email, the contact away, or stopped on the desk. The View by lens narrows the
-rows, and clicking a row narrows the lens so the calendar follows. On a desk the viewer is not
-on, the row shows only the unit, the recipient and the balance. Stopping is desk-wide, so the
-confirmation names every unit of that desk it stops.
+**The account card has one row per desk.** On a customer account's Outreach tab, the chasing
+card groups the business units the account has a balance in by the desk that chases them (spec
+`dashboard-backend/specs/october-2026/outreach-card-by-desk/spec.md`). A desk chases the account
+once across all its units, so its row shows the segment, the units (a "+N" button opens the full
+list), the method, the sending address and the next outreach. A desk that is not chasing says
+why and offers one fix: a draft or paused segment, no segment, nobody to email, the account taken
+off its segment, or no desk at all. A contact who is away keeps the row chasing, with the next
+outreach marked as held. Units on desks the viewer is not on share one "Restricted desk" row that
+shows only the next outreach. The units column hides when the viewer can see one business unit
+or View by is narrowed to one.
 
 ## Why a desk is not a team
 
