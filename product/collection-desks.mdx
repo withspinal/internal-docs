@@ -208,6 +208,42 @@ attachments still run on the caller's own grants, so a member whose grants do no
 the thread's unit can read and reply on the desk inbox but sees those panels empty.
 </Note>
 
+### Attachments on desk mail
+
+Every file on a desk mailbox's mail is stored and can be opened from the conversation. That
+covers mail in the Inbox and mail staff sent from Outlook directly (Sent Items). Read this
+before changing the desk sync, document processing or the download endpoint.
+
+Which files reach document processing is decided by the bytes, never by the file name or
+the label the sender gave it:
+
+| File | Stored as | Status | Processed |
+|------|-----------|--------|-----------|
+| A PDF in the Inbox labelled PDF, or a `.pdf` statement (Oracle's octet-stream statements) | `application/pdf`, with a page count | `NEW` | Yes: classification, invoice and statement matching |
+| Any other real PDF, including every PDF in Sent Items | `application/pdf`, with a page count | `COMPLETED` | No |
+| Everything else | `application/octet-stream` | `COMPLETED` | No |
+
+`COMPLETED` is outside every processing gate, so nothing new reaches Document AI or an LLM.
+Sent Items PDFs are kept out on purpose. A statement a collector sends must not stamp an
+account onto the thread or open chasing on it. Our own sends never reach the pull. The sync
+adopts their Sent Items copy, and their files are already stored by the send.
+
+A file the sync can't store is listed on the email by name, with no download. That happens
+when the file is over 25 MB, when it is past the 50th file on one email, or when it has no
+bytes: an attached email or a OneDrive link. Embedded images, such as signature logos, are
+skipped.
+
+A desk member opens a file through `GET /communications/attachments/{id}/download` with
+the desk's `desk_id`. The desk reaches the file when an email stamped to the desk
+(`emails.desk_id`) carries it. The file's `client_id` doesn't matter, because desk files have
+none until an invoice match. The thread is not the proof either, because one conversation
+can span two desks. Only a `.pdf` name opens in the browser; every other file downloads.
+A `.pdf`-named file that is really HTML still downloads, because it was stored as
+`application/octet-stream`.
+
+There is no virus scanning yet. Google's scan-and-promote pattern is the planned addition,
+and the download endpoint is the one place to add a "scanned" check.
+
 ## Chasing: segments
 
 Since 1 October 2026 (Linear milestone E, spec `dashboard-backend/specs/october-2026/chasing-segments/spec.md`)
@@ -305,5 +341,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
+| Desk attachments: pull, download, spec | `dashboard-backend/src/temporal/shared_mailbox_sync/activities/sync_activities.py` (`_pull_attachments`), `api/routers/communications/router.py` (`download_attachment`); spec `specs/october-2026/desk-inbound-attachments/spec.md` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
