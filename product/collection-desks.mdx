@@ -127,10 +127,33 @@ back, with their sender settings reset, and walks on to the mailbox step so a di
 address can be added; that is the path for changing the desk's email. Removing one mailbox stops its sync after the current
 run and keeps its history; it can be added again and re-reads its history window.
 
-Two honest limits, until a scheduled sync exists: a mailbox pulls when it is added, when
-**Sync now** is pressed and when the domain census is confirmed, so the sync column reads
-"Last full sync <when>" rather than a live cadence; and a mailbox added while Microsoft is
-still granting access says so and waits for **Sync now**.
+Every mailbox that is connected and on a desk syncs every 2 minutes. A Temporal schedule,
+`shared-mailbox-sync-every-2min-<env>`, starts one pull per mailbox and skips a mailbox whose
+last pull is still running. Most of those pulls are light. A light pull lists only mail that
+arrived since the previous pull started, less 10 minutes. When nothing new came in and no
+triage is waiting, it stops after the folder listings and writes no sync history row.
+Archive is listed by when a message last changed instead, because mail reaches Archive by
+being moved and keeps its old received date.
+
+Once a day, the pull is a full one, and so is every pull started by adding the mailbox,
+pressing **Sync now** or confirming the domain census. A full pull re-lists the mailbox's
+whole history window, retries documents that failed, and re-runs triage on mail still
+waiting for a customer match. A mailbox that keeps failing with the same error logs one
+failure row, not one every 2 minutes. A mailbox added while Microsoft is still granting
+access says so and waits for the next pull.
+
+New inbound mail raises a toast for the people on the desk. The event is `desk.new_mail` on
+the inbox events channel. It carries only the desk id and the conversation ids, because that
+channel reaches everyone in the legal entity, not just the desk. The frontend fetches the
+rows through the desk list, `/communications/threads?desk_id=&thread_ids=`. The toast fires
+at the end of the pipeline:
+
+- Mail that goes to classification toasts when classification finishes, with its tag. An
+  out-of-office reply never toasts.
+- Mail that never reaches classification, such as a sender with no customer match, toasts
+  at the end of the pull with no tag.
+
+Only mail received in the last hour toasts, so a first sync's backfill stays quiet.
 
 ## Email branding
 
@@ -305,5 +328,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
+| Scheduled sync and the new-mail toast | `dashboard-backend/src/temporal/shared_mailbox_sync/workflow.py` (`SharedMailboxSyncSchedulerWorkflow`, `SyncMode`), `src/services/collection_desks/new_mail.py`; spec `specs/october-2026/scheduled-mailbox-sync/spec.md` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
