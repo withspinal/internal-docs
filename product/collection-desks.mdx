@@ -143,8 +143,47 @@ the first desk you can see.
 
 Authority stays with the business-unit grant, not the desk. A member whose grants do not
 cover a unit sees it on the page as "no access" and cannot change its letterhead; the desk
-role never widens what a person may edit. There is no signature or language setting; the
-letterhead is header and footer only.
+role never widens what a person may edit. The letterhead is header and footer only; the
+signature under the message is a separate setting, below.
+
+## Email signature
+
+The signature is the sign-off block under the text of every email a desk sends: a name, a
+second line, and a line of links. It is not the letterhead. The letterhead is the same on
+every email from the desk; the signature changes with who sends.
+
+The desk sets the design on its **Email signature** page: a layout (logo and rule, photo,
+or text only), its own logo, and the company, website, main phone and company LinkedIn.
+Each person sets their own name, job title, phone, LinkedIn and photo on their
+**Profile**. Name and email are copied from sign-in once, when the account is created;
+after that the person's edits stand and nothing re-syncs them. Nobody can edit another
+person's profile.
+
+Who signs depends on who sent it:
+
+| Email | Signs as |
+|---|---|
+| New email, reply, reply all, forward, sending any draft | The person who pressed **Send**, even on a draft someone else wrote |
+| Agent replies, reminders, invoice forwards, payment-terms notices | The desk: its name, the company, the company LinkedIn and main phone |
+| Anything not sent from a desk | Nobody, no signature |
+
+A missing field drops its line or link. A person's LinkedIn is their own or none; it never
+falls back to the company page. When the desk signs, the agent's closing "Kind regards,
+The `{desk}` team" is cut to "Kind regards," so the name is not said twice.
+
+Spinal adds the signature at the moment of sending, inside the letterhead, above any
+forwarded message. It is never stored on the email, the draft or the approval, so sent
+mail in Spinal shows without it, as it does without the letterhead. Approvals cover the
+text, not the signature. If the lookup fails, the email goes out unsigned rather than
+not at all.
+
+A desk starts with no signature until someone picks a layout. Turn on **Our IT adds
+signatures** when the customer runs Exclaimer, CodeTwo or an Exchange rule: Spinal then
+adds none, so customers do not get two. Microsoft Graph never adds the person's Outlook
+signature to mail Spinal sends.
+
+Anyone who can change the desk's settings can change the signature, which today is any
+member of the desk or a group admin.
 
 A group with one business unit skips the unit picker on New desk: the unit is the desk's
 scope, and if it is already on a desk the page says so and Create stays locked.
