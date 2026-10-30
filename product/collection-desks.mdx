@@ -223,15 +223,36 @@ open balance over an amount in a named currency, days overdue, payment plan in a
 hold; several predicates AND together, another segment is the OR) and a chase mode: a dunning
 ladder, an AI agent (milestone C, not live yet), or manual (the collector on the account).
 In the product today every segment is a hand-picked list of accounts, and a list keeps its
-accounts. Going live takes only the accounts no other live segment holds, so activating a
-segment never pulls an account off another live one. A draft's picks move nothing. The only
-way to move an account between live segments is to pick it in Edit audience on the segment
-that should have it. The default segment holds every account no list holds, and those
-leftovers are free for any segment to take. Rule matching by class, balance or days overdue
-is still in the code, but nothing in the product creates a rule segment. "Everyone else" is
-the catch-all. Every desk is born with its catch-all, draft and manual, so a new desk chases
-nobody until someone activates a ladder. A draft segment is not matched; it only shows how
-many accounts it would take.
+accounts. A segment made on the Chase page is chased by the desk's AI agent. Ladder and manual
+segments from before still run, but the page no longer edits them. A pick moves the account:
+when New segment creates a segment, or Finish setting up starts a draft, its picks come off
+whichever segment held them, live ones included (`activate` with `take=True`). Editing a live
+segment's list in Edit audience moves accounts the same way. A draft's picks move nothing until
+it starts. Resuming a paused segment keeps what other live segments hold. The default segment
+holds every account no list holds, and those leftovers are free for any segment to take. Rule
+matching by class, balance or days overdue is still in the code, but nothing in the product
+creates a rule segment. A draft segment is not matched; its Accounts count is the list it
+would take.
+
+**A new desk's first segment.** Since 30 October 2026 (spec
+`dashboard-backend/specs/october-2026/chase-starting-state/spec.md`) a desk is born with one empty
+draft AI segment, "My first chase". Spinal makes it in the create-desk request, so it has no
+creator, and the Chase page tags it "Created for you". It is not the default, so a data sync adds
+nobody to it. Finish setting up opens the New segment dialog on it: a name, the customers, and
+the sending address when the desk has more than one. Starting it is one request,
+`POST /collection-desks/{desk_id}/segments/{segment_id}/activate` with a body. That request is
+refused with a 409 unless the segment is still a draft, so a retry cannot wake the agent twice.
+The switch and the row menu never start a draft. Desks created before this keep the live
+"Customers" segment they were born with.
+
+**Picking customers.** The picker behind New segment, Finish setting up and Edit audience lists
+every customer of the desk, owing or not. It filters by amount outstanding, overdue (in days or
+by amount), class, and whether another segment holds the account. It sorts by name, outstanding
+or overdue, most overdue first by default. Amounts are the account's dominant ledger-currency
+balance, the same figure the Customers list sorts by, compared as a plain number whatever the
+currency. There is no FX conversion yet. "Select all" asks
+`GET /collection-desks/{desk_id}/chasing/customers/ids` for everyone the filters match, up to the
+10,000 a list can hold.
 
 **Matching is materialised.** The hourly planner sweep walks the book through the live
 segments and writes one row per account into `collection_desk_segment_accounts`, which is
