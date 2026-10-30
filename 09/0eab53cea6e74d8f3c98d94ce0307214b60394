@@ -1,0 +1,19 @@
+product/collection-desks.mdx
+  s_5043521bd72af3::t_5a14d728043e16 226-255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "090eab53cea6e74d8f3c98d94ce0307214b60394",
+  "prompts": {},
+  "sessions": {
+    "s_5043521bd72af3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8f7b06e-c1ee-43ff-b959-dc9bc6b5e21d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Taine de Buys <taine@withspinal.com>"
+    }
+  }
+}
