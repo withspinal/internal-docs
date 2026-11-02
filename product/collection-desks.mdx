@@ -258,11 +258,28 @@ engine row is not a campaign to any API: the campaign endpoints cannot see it, a
 update and ladder edits refuse it. A campaign that still exists never plans on a unit that is on
 a desk.
 
-**Schedule and sender.** The desk carries sending days and a local send time; saving them is
-written into every engine and every ladder step, so the ladder's own times never apply. The
+**Schedule and sender.** Each segment carries its own sending days and local send time, and
+saving them writes them into that segment's engine and ladder steps, so a ladder's own times
+never apply. Send days are no longer edited in the product: a segment keeps the days it has,
+Monday to Friday by default, and Edit segment shows only the send time. The
 chase channel is one of the desk's outbound channels; no channel means the reminder is held
 visibly, never sent from a Postmark identity. A desk cannot send from another desk's inbound
 mailbox.
+
+**Agent rules.** An AI segment carries up to 20 rules for its agent, each one plain-English
+line such as "Keep emails short and friendly". People write them in the second step of New
+segment and on the segment's Rules tab. The agent reads them as a CLIENT RULES block in its SOP
+every time it plans or drafts for an account in that segment.
+
+Spinal's own rules sit above them. A rule can change the default tone, wording, structure and
+cadence. It never changes the hard limits or the invoice facts, and it never changes what code
+decides: send days, recipients, dispute holds and do-not-contact windows. The planner also
+refuses any new action in the legal tone, whatever a rule says.
+
+Saving a change on a live segment wakes every account in it with `sop_changed`. That forces a
+fresh plan and rewrites every draft nobody has approved or edited, at one model call per draft.
+Ladder and manual segments take no rules, and switching a segment away from AI clears them. The
+spec is `dashboard-backend/specs/november-2026/segment-agent-rules/spec.md`.
 
 **Letterhead.** One header and footer per desk, on every chase and every reply sent as the desk
 (the per-unit letterheads keep serving sends outside a desk). Upload, pick from the group's
@@ -271,7 +288,7 @@ library, or remove it on the desk's Email letterhead page.
 **Who may do what.** Any live member of the desk, or a group admin, creates, orders, activates
 and pauses segments and sets the schedule, channel and letterhead. Reads are desk-bound.
 
-**Not in this cut.** The agent mode's execution, approvals and SOPs (milestone C); "Collected,
+**Not in this cut.** The agent mode's execution and approvals (milestone C); "Collected,
 30d" and "Replied, 30d"; holidays and preview-before-send; shared ladders across desks; tags on
 accounts; statements instead of the per-unit sheet; deleting the campaign tables.
 
@@ -305,5 +322,6 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Sign-in linking of pending members | `GroupAdminBootstrapService.link_desk_memberships` |
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
+| Agent rules: storage, the CLIENT RULES block, the legal-tone check | `segments.py` `set_agent_rules`; `natural_outreach/reasoning/{prompts,sop_schema,validators}.py`; spec `specs/november-2026/segment-agent-rules/spec.md` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
