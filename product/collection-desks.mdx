@@ -254,18 +254,34 @@ currency. There is no FX conversion yet. "Select all" asks
 `GET /collection-desks/{desk_id}/chasing/customers/ids` for everyone the filters match, up to the
 10,000 a list can hold.
 
+**Assigning customers.** "N not chased · See them" on the Chase page opens Assign customers
+(spec `dashboard-backend/specs/november-2026/assign-customers-modal/spec.md`). It lists every
+account on the book with the segment it is on, read from
+`GET /collection-desks/{desk_id}/chasing/accounts`. A row's segment is the one holding the
+account, or else a draft that picked it. The Filter menu has the picker's filters plus Segment
+(with a count per segment from `.../chasing/accounts/segment-counts`) and Chasing. The money
+columns, and why an account is not chased, show only while you filter on them. A row's segment
+picker saves at once. Picking "Not in a segment" takes the account off its segment, which is
+how you stop chasing one. Picking any segment chases it again, because a pick lifts the stop.
+There is no separate "taken off" state: once removed, the account looks like any other account
+in no segment. Ticked rows go to the footer's segment together. A live segment's list takes the
+accounts off every other list by itself. A move to a draft, or to no segment, also strips them
+from every other list, so an account is on one segment at a time.
+
 **Matching is materialised.** The hourly planner sweep walks the book through the live
 segments and writes one row per account into `collection_desk_segment_accounts`, which is
 UNIQUE on (desk, account): one segment per account per desk, enforced by the database. A
 changed match is a move: the old segment's planned reminders (the consolidated email included)
 end with reason `moved`, never a user cancel, and the new segment plans in the same sweep.
 Lists never overlap, so no two live segments want the same account. An
-account a person excludes ("Stop chasing on this desk" on the account card) is never matched
-again until the exclusion is lifted.
+account a person takes off its segment (Assign customers, or "Stop chasing on this desk" on the
+account card) gets a stop record, so a data sync never puts it on the default again. Putting it
+on any segment lifts the stop.
 
 **Not chased** has one meaning: accounts no active segment reaches, accounts an active ladder
-holds but nobody can be emailed for in any desk unit, accounts under a paused segment, excluded
-accounts, and manual-segment accounts with no collector. A disputed invoice is not "not chased":
+holds but nobody can be emailed for in any desk unit, accounts under a paused segment, and
+manual-segment accounts with no collector. An account taken off its segment counts under no
+active segment, like any other account in none. A disputed invoice is not "not chased":
 it is held at send time and shown on the segment page.
 
 **One chase per desk and account, across units and legal entities.** A ladder segment is run by
