@@ -271,7 +271,26 @@ library, or remove it on the desk's Email letterhead page.
 **Who may do what.** Any live member of the desk, or a group admin, creates, orders, activates
 and pauses segments and sets the schedule, channel and letterhead. Reads are desk-bound.
 
-**Not in this cut.** The agent mode's execution, approvals and SOPs (milestone C); "Collected,
+**Approval of AI drafts.** Each AI segment has one switch, **Approve emails before they send**,
+at the top of the segment's Rules tab. It is on by default, so every draft the agent writes waits
+for a person as an approval task on Desk tasks. Switched off, the segment's drafts send on their
+own at their scheduled time, and a person can still pull one back for review. The setting is
+stored per segment in `collection_desk_segments.auto_approve` (true means the drafts send on their
+own) and set with `PUT /collection-desks/{desk_id}/segments/{segment_id}/auto-approve`. Ladder
+and manual segments have no switch.
+
+Turning approval back on answers at once. The request recalls anything the system had queued to
+send today, and the approval tasks arrive a few seconds later from the `DeskApprovalCardsWorkflow`
+Temporal job, about 3 seconds for every 25 drafts. Until a draft's task arrives it shows as
+scheduled on the calendar, but it cannot send: with approval on, nothing goes out without a person.
+
+If the tasks never arrive, the job did not start or gave up after 20 attempts. Search the worker
+logs for `raise_desk_approval_cards` to see why, then send the same request again with
+`auto_approve` false. Every request re-runs the job, and the job raises only the missing tasks.
+Do not repair it by switching approval off and on again: switching it off sends any overdue draft
+straight away.
+
+**Not in this cut.** The agent mode's execution and SOPs (milestone C); "Collected,
 30d" and "Replied, 30d"; holidays and preview-before-send; shared ladders across desks; tags on
 accounts; statements instead of the per-unit sheet; deleting the campaign tables.
 
