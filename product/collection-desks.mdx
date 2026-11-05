@@ -333,8 +333,8 @@ been on screen in that browser for 30 minutes. It never plays between pages or o
 `frontend/src/components/launch-splash.tsx`, and it holds until `LaunchReady` says the page's first data is in.
 
 <Note>
-`notifications.issue_id` and the `ISSUE` and `INCOMING_COMMUNICATION` enum values are still in the database, and no
-code reads them. A contract migration drops them one release after `task_id` ships, so servers on the old code keep
+`notifications.issue_id` and the `ISSUE` and `INCOMING_COMMUNICATION` enum values are still in the database, and
+nothing writes them. The enum in code keeps both so an old row still loads. A contract migration drops them one release after `task_id` ships, so servers on the old code keep
 working during the deploy.
 </Note>
 
