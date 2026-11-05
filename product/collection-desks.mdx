@@ -285,6 +285,59 @@ rows, and clicking a row narrows the lens so the calendar follows. On a desk the
 on, the row shows only the unit, the recipient and the balance. Stopping is desk-wide, so the
 confirmation names every unit of that desk it stops.
 
+## Redraft progress and task toasts
+
+Read this before changing a wake that redrafts a segment, the `notifications` table or a toast.
+
+**Redraft runs.** When someone's action makes an AI segment's agents redraft (a new segment, a rules
+save or a resume), that person gets a live toast. Each action writes one row in
+`segment_redraft_progress`, and each customer gets one row in `segment_redraft_progress_customers`. The
+customer's agent ticks its own line twice: when it starts, in `assemble_campaign_context`, and when it
+finishes, in `record_wake_log`. These tables track status only. Nothing reads them to decide what to
+draft. `SegmentRedraftProgressService` is the only writer.
+
+A run moves from `READING_RULES` to `RUNNING` to `DONE`. It can also end as `NO_REDRAFT`, `SUPERSEDED` (a newer
+save took over) or `CANCELLED` (the segment was paused). The last customer's tick settles a run. A 5-minute
+sweep, `SegmentRedraftProgressSweepWorkflow`, settles the ones that stall. Only the person who did the action
+sees the toast.
+
+**One redraft per rules save.** A save opens a `READING_RULES` run and wakes nobody. The classification
+workflow calls `wake_after_rule_classified` as each rule settles, and the last rule read on the segment wakes
+everyone once. A new segment launched with rules holds its go-live wake the same way.
+
+**Task notifications.** A row in `notifications` points at a task, not an issue, through `task_id`.
+`NotificationService.notify_task` is the only writer of `TASK` rows. A new task's row is written when the task is
+named (`notify_task_named`, called from `_name` in `name_task.py`), because an unnamed task is not on the desk.
+If that write fails, the error is logged and the title still commits, so a notification can never hide a task.
+
+A draft's task is born named, so the draft mint writes its row directly. An issue joining a task that is already
+open writes nothing.
+
+Who sees a row:
+
+| Row | Who sees it |
+|-----|-------------|
+| Addressed to a person (`user_id` set) | That person |
+| Shared, task on a desk | Anyone who can see the desk |
+| Shared, no desk or a client-grain setup issue | Anyone whose scope covers the unit |
+
+`NotificationService.viewer_context` reads the rows for one socket, and only for an hour. The toast is their
+only reader, and only a row it has not seen can pop.
+
+**The toasts.** One rule covers every toast, in `lifetime` in `frontend/src/hooks/useToast.ts`. A toast you can act
+on, or one that reports a problem, stays for 3 minutes or until you close it. The rest fade in seconds. The browser
+counts a wave of new tasks in one toast (`frontend/src/components/task-toast.tsx`). The server has no idea of a wave.
+
+**The logo entrance.** It plays on a cold start: the first load after signing in, or arriving after Spinal has not
+been on screen in that browser for 30 minutes. It never plays between pages or on a refresh. The script is in
+`frontend/src/components/launch-splash.tsx`, and it holds until `LaunchReady` says the page's first data is in.
+
+<Note>
+`notifications.issue_id` and the `ISSUE` and `INCOMING_COMMUNICATION` enum values are still in the database, and no
+code reads them. A contract migration drops them one release after `task_id` ships, so servers on the old code keep
+working during the deploy.
+</Note>
+
 ## Why a desk is not a team
 
 Teams already exist and look similar: group-owned, with members and business-unit
@@ -306,4 +359,5 @@ the desk, and each referenced unit or mailbox is pinned to the same group.
 | Spec, red-team findings and the decisions | `dashboard-backend/specs/september-2026/collection-desk-object/spec.md`, then `collection-desk-milestone-a-remainder/spec.md` (moves, branding, complete-desk gate, membership-bound settings) |
 | Segments, the book, matching, the engine seams | `dashboard-backend/src/services/collection_desks/{segments,book,matching,rules}.py`, `api/routers/collection_desks/chasing_router.py`; spec `specs/october-2026/chasing-segments/spec.md` |
 | Move handshake on the frontend | `frontend/src/app/(protected)/settings/desks/_components/use-move-flow.ts` |
+| Redraft runs and task notifications: specs | `dashboard-backend/specs/november-2026/agent-progress-toast/spec.md`, `.../task-notifications/spec.md` |
 | Product decisions and the evidence behind them | Linear project "Collection desks", document "Collection desks: decisions and evidence" |
