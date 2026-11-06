@@ -325,12 +325,16 @@ Who sees a row:
 only reader, and only a row it has not seen can pop.
 
 **The toasts.** One rule covers every toast, in `lifetime` in `frontend/src/hooks/useToast.ts`. A toast you can act
-on, or one that reports a problem, stays for 3 minutes or until you close it. The rest fade in seconds. The browser
+on, or one that reports a problem, stays for 3 minutes or until you close it. The rest fade in seconds. Every toast sits in the top-right corner. The browser
 counts a wave of new tasks in one toast (`frontend/src/components/task-toast.tsx`). The server has no idea of a wave.
 
 **The logo entrance.** It plays on a cold start: the first load after signing in, or arriving after Spinal has not
 been on screen in that browser for 30 minutes. It never plays between pages or on a refresh. The script is in
 `frontend/src/components/launch-splash.tsx`, and it holds until `LaunchReady` says the page's first data is in.
+
+A cold start lands on Home, unless it came by a link, bookmark or typed address, which open what they point at. The
+browser reports which: a restored tab is `back_forward` and a link is `navigate`. The server sees the same request for
+both, so `launch-splash.tsx` and the sign-in page decide this, not `proxy.ts`.
 
 <Note>
 `notifications.issue_id` and the `ISSUE` and `INCOMING_COMMUNICATION` enum values are still in the database, and
