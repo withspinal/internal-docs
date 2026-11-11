@@ -1,0 +1,21 @@
+docs.json
+  s_eb6b34a81cdea0::t_056f762ce68c81 56-57
+product/invoice-activity-timeline.mdx
+  s_eb6b34a81cdea0::t_056f762ce68c81 1-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ac828ce47860a3de489662c395b7343a537a79aa",
+  "prompts": {},
+  "sessions": {
+    "s_eb6b34a81cdea0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cfc18fdf-26fa-44f1-937d-ed1691539689",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "Taine de Buys <taine@withspinal.com>"
+    }
+  }
+}
