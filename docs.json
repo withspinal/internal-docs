@@ -53,7 +53,8 @@
           {
             "group": "Collections",
             "pages": [
-              "product/collection-desks"
+              "product/collection-desks",
+              "product/invoice-activity-timeline"
             ]
           }
         ]
