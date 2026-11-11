@@ -1,0 +1,144 @@
+---
+title: "Invoice activity timeline"
+sidebarTitle: "Invoice activity"
+description: "Where the Activity list on an invoice comes from, how a new kind of row gets onto it, and what to check when a row is missing"
+icon: "timeline"
+---
+
+The Activity list on an invoice page (`/transactions/[id]`) shows what happened to that
+invoice and what happens next. Read this page before you add a new kind of row, change
+what a row says, or debug a row that is missing. After it you will know which table the
+list reads, who writes to it, and which parts are worked out when the page loads.
+
+## What the list shows
+
+The list has three parts, and they come from different places.
+
+| Part | What it is | Where it comes from |
+|------|------------|---------------------|
+| The past | Rows above the Today marker: emails, replies, reminders that did not send, issues, promises, payments, ERP amount changes. | Stored rows in `transaction_events`. |
+| The future | Rows below Today: the next reminder and a promise that is due. | Worked out when the page loads from scheduled `planned_outreach` rows and the open promise. Never stored. |
+| What is live | The "Chasing paused" line and the task line in the header. | Worked out when the page loads. Never stored. |
+
+A row is anything that changed the balance, the due date, a promise, the conversation, or
+a person's decision. An agent's draft is not a row until it sends. Email opens, delivery
+receipts and a placed call are stored but the page does not draw them.
+
+## The table
+
+`transaction_events` is an append-only table with one row per thing that happened. The
+model is `src/database/models/transaction_event_model.py` in `dashboard-backend`.
+
+Each row has an `event_type` (what happened), an `occurred_at` (when it happened in the
+real world, never when the row was written), an `actor_kind` (agent, user, customer,
+system or ERP), and a typed JSON `payload`. The payload models are in
+`src/services/transaction_events/payloads.py`. Read a payload through its model, never
+with `dict.get`.
+
+A row is linked to its invoices through `transaction_event_transactions`. One email about
+five invoices is one event row with five link rows. A row with `grain = account` has no
+link rows and shows on every invoice of that customer account, for example a
+do-not-contact pause.
+
+A row belongs to one business unit, and a person sees it only if they can see that unit.
+An email linked to invoices in two business units is written as two rows, one per unit.
+Issue rows are the exception: an issue row takes the issue's own unit.
+
+`source_kind` and `source_id` point at the record the row came from, such as the email or
+the receipt application. `source_id` has no foreign key on purpose. The history has to
+stay when the source record is deleted, for example an email removed after a hard bounce.
+
+## How a row gets written
+
+A row is written in one of two ways, and both go through the same builders so they
+produce the same row.
+
+The first way is inline. The code that owns the fact calls
+`TransactionEventService.emit` in the same database session, so the event commits or
+rolls back with the fact. `emit` never raises on a duplicate or on a missing business
+unit. That matters because it runs inside the session that stores a real customer email.
+
+The second way is the reconcile sweep in `src/services/transaction_events/reconcile.py`.
+It runs every hour as the `reconcile_transaction_events` Temporal activity, beside the
+staleness scan. It reads each source table for recent rows, builds the events, and
+inserts them with `ON CONFLICT DO NOTHING`. It catches anything an inline call missed,
+and it is the only writer for facts that arrive from the ERP load, such as receipts and
+adjustments.
+
+Every row has an `event_key` that is unique per business unit. The inline call and the
+sweep build the same key for the same fact, so a fact is never written twice.
+
+## Adding a new kind of row
+
+To add a new kind of row you change the backend in four places and the frontend in one.
+
+1. Add the member to the end of `TransactionEventType` and write a migration that adds
+   the enum value. The enum is append-only.
+2. Add or reuse a payload model in `payloads.py`.
+3. Add a builder in `src/services/transaction_events/builders.py` that turns the source
+   record into an `EventSpec`. Call it from the owner of the fact, and from a reconcile
+   source so the sweep can replay it.
+4. If the read needs to put the payload in a new field, add it to `PAYLOAD_FAMILIES` in
+   `src/api/routers/ar_transactions/activity.py`.
+5. In the frontend, teach `describeEvent` in
+   `src/app/(protected)/transactions/[id]/components/activity-rows.ts` what the row says.
+   An event type it does not know is not drawn.
+
+Write the row's words in `activity-rows.ts` only. The backend stores facts and the
+frontend chooses the wording, so a wording change never needs a backfill.
+
+## The read
+
+The page calls `GET /ar-transactions/{id}/activity`, built by `build_activity` in
+`src/api/routers/ar_transactions/activity.py`. It returns four things: `events`,
+`upcoming`, `paused` and `needs_person`.
+
+`events` are the stored rows, oldest first. An issue or promise that came from a customer
+reply is folded into that reply's row, so the reply shows once with its classification.
+
+`upcoming` is every scheduled reminder that covers the invoice, plus the promise due
+date. A reminder held for approval is still in `upcoming`, marked `awaiting_approval`.
+
+`paused` is set in two cases only: the customer has a do-not-contact window on the
+invoice's business unit, or the customer's chasing segment is paused. An agent with nothing to
+chase is idle, not paused, and a customer who is not in a segment is unassigned.
+
+`needs_person` is the open task that is waiting for someone, read from the open issue
+when the page loads. It drives the task line in the header and the "Review reply"
+button.
+
+The read does not load email bodies. A row that opens a conversation links to the thread
+instead.
+
+## When a row is missing
+
+Check these in order.
+
+1. Look for the stored row. Query `transaction_events` joined to
+   `transaction_event_transactions` on the invoice's id. If the row is there, the
+   frontend chose not to draw it. Check `describeEvent`.
+2. If the row is not there and the fact is less than an hour old, wait for the next
+   sweep or check that the owner of the fact calls `emit`.
+3. If the fact is older, run the sweep for that source by hand inside the backend
+   container. It is safe to run again: it inserts only what is missing.
+
+   ```bash
+   uv run python -m scripts.backfill_transaction_events --source emails
+   ```
+
+   Leave out `--source` to run every source. The source names are the `SOURCES` list in
+   `reconcile.py`.
+4. If the person cannot see the row but a colleague can, compare their business unit
+   grants. The row belongs to one unit.
+
+<Note>
+A new environment, or one restored from an older dump, has an empty `transaction_events`
+table. Run the backfill with no `--source` once after the migrations, or every invoice
+shows an empty Activity list.
+</Note>
+
+## Rows you may find in the table that the page hides
+
+Rows with `source_kind = wake_log` are `chase_paused` and `chase_resumed` rows that an
+earlier version wrote when the agent had nothing to chase. Nothing writes them any more
+and the read filters them out. They stay because the table is append-only.
