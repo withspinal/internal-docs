@@ -87,6 +87,41 @@ To add a new kind of row you change the backend in four places and the frontend 
 Write the row's words in `activity-rows.ts` only. The backend stores facts and the
 frontend chooses the wording, so a wording change never needs a backfill.
 
+## The rules every row follows
+
+Every row is built by `buildActivity` in `activity-rows.ts` and has the same parts. When
+you add a row, fill these parts by the rules below and do not add a new part.
+
+| Part | Rule |
+|------|------|
+| Date column | Do not format it in the row. `rowDate` decides for every row: an event with a time shows "5 Nov, 16:20", a fact the ERP dates by day alone shows "5 Nov", and a day from another year shows "5 Nov 2025" with no time. The Due and Today markers are not rows and show a word here. |
+| Title | What happened, with the amount when money moved. The person or customer who acted comes first when one is known. |
+| Detail | The grey text after the title. Use it for facts about this row only, such as what is still open after a payment. Never repeat the time here. |
+| Click | A row leads to one place, and the whole row is the click target. Pick one of the actions below. |
+| Task link | Set by the backend, never by the row. See below. |
+
+A row's hover label names the place the click lands. One place has one label, so two
+rows that open the same place can never say different things.
+
+| Label | Where the click lands | Used by |
+|-------|-----------------------|---------|
+| Open thread | The conversation in Mail, on that row's own message when the row is an email. | Every email row, the Issued row when its issue email is known, and every issue or promise row that has a conversation. |
+| Open task | The desk's task list. | An issue row with no conversation. |
+| View invoice | The invoice PDF. | The Issued row when no issue email is known. |
+| Review draft | The draft's review dialog. | A reminder or reply that waits for a person. |
+| Edit reminder | The reminder editor. | A scheduled reminder. |
+
+An email row opens on its own message because the read sends the email's id in
+`links.email_id`, and the row's link carries it as `?thread=<id>&email=<id>`. Mail opens
+that message and scrolls to it. A row that is not an email opens the conversation at its
+newest message.
+
+The "Open task" link at the right of a row is separate from the row's click and goes to
+the task page. The read sets `links.task_id` only on rows that belong to the task that is
+open now: the reply that raised its open issue, and every row on that conversation after
+it. A reminder sent before the task existed, or a reply about an issue that is resolved,
+has no task link. When the task closes, no row has one.
+
 ## The read
 
 The page calls `GET /ar-transactions/{id}/activity`, built by `build_activity` in
