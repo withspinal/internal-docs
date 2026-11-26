@@ -1,0 +1,125 @@
+---
+title: "Steering a drafted reminder by talking to the agent"
+sidebarTitle: "Steering a drafted reminder"
+description: "How a person's words in the draft panel become a rework, a cancel or a remembered preference, and where each step lives in the code."
+icon: "comments"
+---
+
+This page is for an engineer who has to change or debug what happens when a person talks to
+the agent about an AI reminder draft. After reading it you can follow one message from the
+box in the draft panel to the rewritten draft, and you know which module owns each step.
+
+The spec is `specs/november-2026/outreach-redraft-chat/spec.md` in `dashboard-backend`.
+
+## Two agents, one conversation
+
+Two agents are involved and their work does not overlap.
+
+- The issue agent holds the conversation. Its code is in
+  `src/services/issue_resolution/agent/`. It reads what the person wrote, calls tools, and
+  raises cards.
+- The reminder agent writes reminders. It is the `NaturalCampaignWorkflow` in
+  `src/temporal/natural_campaign/`. It alone decides when a reminder goes, which invoices
+  it chases and what it says.
+
+The issue agent never writes or edits a reminder. Its tools pass the person's instruction
+to the reminder agent, which reworks its own draft.
+
+## Where the conversation comes from
+
+A draft has an approval task, the task of its `AI_OUTREACH_APPROVAL` issue. The issue's
+`context` holds `source_planned_action_id`, the id of the draft's planned action.
+
+A conversation is keyed on a thread, and a draft for a customer who never emailed has no
+thread. `POST /tasks/<task_id>/reminder-conversation` gives the task a thread id the first
+time it is called and returns the conversation keyed on it. The draft panel calls it when
+the person sends their first message.
+
+When the reminder sends, it sends on that thread. `thread_of_draft` in
+`src/services/natural_outreach/rework_record.py` finds it. The customer's reply then lands
+in the same conversation.
+
+A draft on a segment that sends without approval has no approval task. It has no
+conversation, and its box calls the redraft endpoint directly.
+
+## The tools
+
+All five are in `src/services/issue_resolution/agent/tools/`.
+
+| Tool | File | What it does |
+|---|---|---|
+| `list_reminder_drafts` | `reminders.py` | Reads the customer's pending drafts at the desk. |
+| `request_rework` | `reminders.py` | Hands a person's instruction for one draft to the reminder agent. No card. |
+| `cancel_reminder` | `reminders.py` | Raises a question card whose choices are reasons. Picking a reason cancels the draft. |
+| `remember` | `reminders.py` | Raises a question card asking who a preference is for. Picking a scope saves it. |
+| `ask_person` | `ask.py` | Raises a question card with two to four choices that only answers the agent. |
+
+`request_rework`, `cancel_reminder` and `remember` refuse unless a person wrote in the
+current run. The customer and the desk always come from the run, never from what the
+model wrote.
+
+## A rework, step by step
+
+A rework starts with the person's message and ends with the agent saying the new version
+is ready. These are the steps between.
+
+1. `request_rework` screens the instruction and calls `begin_rework` in
+   `src/services/natural_outreach/rework.py`. The redraft endpoint calls the same function.
+2. `begin_rework` sets the lease `redraft_requested_at` on the draft's `planned_outreach`
+   row and writes `redraft_request`: the instruction, who asked, when, and the subject,
+   body and send time as they stood. It signals the reminder workflow after commit.
+3. The workflow rewrites the draft. `begin_redrafts_activity` refreshes the "as it stood"
+   part of `redraft_request` where the rewrite starts.
+4. `settle_redrafts_activity` calls `settle_reworks` in `rework_record.py`. For a draft that
+   was rewritten it writes one `draft_feedback` row of kind `REPLACED`, holding the before
+   and after. For any settled request it writes a `rework_settled` event into the
+   conversation and wakes it. Then it clears `redraft_request`.
+5. The issue agent runs again and tells the person the new version is ready, or that it
+   could not be done.
+
+The draft's read, `GET /planned-outreach/by-action/<action_id>/draft`, returns the kept
+versions as `replaced_versions`. The panel draws each one greyed above the message that
+asked for it.
+
+One rework runs at a time on a draft. A second `request_rework` during the lease returns
+"already under way" and signals nothing.
+
+## The question card
+
+A question is a card of kind `question` (`QuestionCardSummary` in
+`src/services/agent_tool_requests/models.py`). It has two to four choices. A choice may be
+marked `suggested`, and may carry `does`: cancel a draft, or remember a note for a scope.
+
+A person answers by pressing a choice. That is `POST /tasks/<task_id>/cards/<card_id>/decision`
+with `decision: "approve"` and `choice` set to the choice's key. "Not now" is a decline and
+applies nothing. Typing "yes" never answers a question.
+
+After the pick, the thread's session workflow runs `QuestionCardExecutor` in
+`src/services/issue_resolution/card_send.py`. It does what the choice says through
+`src/services/natural_outreach/draft_decisions.py`, in the name of the person who picked.
+The agent's next run starts with what was picked and what came of it.
+
+Only one card waits per conversation. A question and an email card never wait together,
+and a second question replaces the first.
+
+## Adding something a conversation can do about a reminder
+
+Add a tool in `tools/reminders.py` that calls the reminder's own owner. Do not write a
+draft's words, date or invoices from a tool. If the act needs a person's press, build its
+choices with `question_card` and raise them with `ask` from `tools/ask.py`, then teach
+`QuestionCardExecutor` what the choice does.
+
+A new card kind or event kind is read by strict unions. Ship every reader one deploy
+before the code that writes it, or a pod that does not know the kind fails on any
+conversation that holds one.
+
+## Where to look when it goes wrong
+
+- The draft stays "Redrafting" for 30 minutes and then reads "Not rewritten". The lease
+  expired with no settle. Look for `settle_redrafts_activity` and `settle_reworks` in the
+  worker's logs for the customer account.
+- The draft was rewritten and the agent said nothing. `settle_reworks` only tells a
+  conversation that a person wrote in. Check that the approval task has a `thread_id` and
+  that the conversation has a `PERSON_MESSAGE` row.
+- A pick did nothing. Read the card's `outcome` and `outcome_detail.reason` in
+  `agent_tool_requests`. A refusal says why in words.
