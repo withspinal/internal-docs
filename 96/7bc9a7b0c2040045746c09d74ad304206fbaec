@@ -1,0 +1,21 @@
+docs.json
+  s_077aee68083d18::t_999ea554e8c208 56-57
+product/steering-a-drafted-reminder.mdx
+  s_077aee68083d18::t_999ea554e8c208 1-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "967bc9a7b0c2040045746c09d74ad304206fbaec",
+  "prompts": {},
+  "sessions": {
+    "s_077aee68083d18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5de12315-fca5-47fa-b8b4-4fb1f8c1dcab",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "Taine de Buys <taine@withspinal.com>"
+    }
+  }
+}
